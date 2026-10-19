@@ -1,14 +1,19 @@
 import Phaser from 'phaser';
 import { COUNTRIES } from '../data/countries';
 import { EliminationTracker } from '../core/elimination';
+import { Tournament } from '../core/tournament';
 import { arenaRing } from '../levels/arena-ring';
 import type { RingLevel } from '../levels/types';
 
-const CENTER = { x: 450, y: 450 };
+const CENTER = arenaRing.center;
 const MARBLE_RADIUS = 16;
 const WALL_THICKNESS = 24;
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
-const MARBLE_COUNT = 50;
+const POOL_SIZE = 50; // flags drawn at the start of a tournament
+const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
+const PANEL_X = 24;
+const PANEL_ROW_Y = 84;
+const PANEL_ROW_HEIGHT = 48;
 const SPAWN_SPACING = 24; // sunflower spiral scale; neighbours end up ~34px apart
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const MARBLE_SPEED = 3.5; // px per physics step
@@ -21,8 +26,18 @@ function angleDiff(a: number, b: number): number {
   return d > Math.PI ? TAU - d : d;
 }
 
-/** Level 1: marbles in a rotating ring. Marbles that fall through a hole are eliminated. */
+function countryName(code: string): string {
+  return COUNTRIES.find((c) => c.code === code)?.name ?? code;
+}
+
+/**
+ * Tournament on the rotating-ring level: 5 rounds, each won by the last marble inside the ring.
+ * Round winners are listed on the left and meet in the finale.
+ */
 export class ArenaScene extends Phaser.Scene {
+  private tournament!: Tournament;
+  private panelRows: { icon: Phaser.GameObjects.Image | null; text: Phaser.GameObjects.Text }[] =
+    [];
   private tracker!: EliminationTracker;
   private level: RingLevel = arenaRing;
   private ring!: MatterJS.BodyType;
@@ -35,8 +50,19 @@ export class ArenaScene extends Phaser.Scene {
     super('Arena');
   }
 
+  init(data: { tournament?: Tournament }): void {
+    this.tournament =
+      data.tournament ??
+      new Tournament(
+        Phaser.Utils.Array.Shuffle([...COUNTRIES])
+          .slice(0, POOL_SIZE)
+          .map((c) => c.code),
+      );
+  }
+
   create(): void {
     this.finished = false;
+    this.panelRows = [];
     this.marbles.clear();
     // Top-down arena: no gravity, marbles keep moving and bounce off walls and obstacles.
     this.matter.world.setGravity(0, 0);
@@ -44,17 +70,17 @@ export class ArenaScene extends Phaser.Scene {
     this.ringGfx = this.drawRing(this.level);
     this.buildObstacles(this.level);
 
-    const ids = Phaser.Utils.Array.Shuffle([...COUNTRIES]).slice(0, MARBLE_COUNT);
-    this.tracker = new EliminationTracker(ids.map((c) => c.code));
+    const ids = Phaser.Utils.Array.Shuffle(this.tournament.participants);
+    this.tracker = new EliminationTracker(ids);
 
-    ids.forEach((c, i) => {
+    ids.forEach((code, i) => {
       // Sunflower spiral keeps the marbles evenly spread and non-overlapping at the start.
       const a = i * GOLDEN_ANGLE;
       const r = SPAWN_SPACING * Math.sqrt(i + 0.5);
       const img = this.matter.add.image(
         CENTER.x + Math.cos(a) * r,
         CENTER.y + Math.sin(a) * r,
-        `marble-${c.code}`,
+        `marble-${code}`,
         undefined,
         {
           // Body is built at texture size; setDisplaySize below scales it down to MARBLE_RADIUS.
@@ -68,13 +94,52 @@ export class ArenaScene extends Phaser.Scene {
       img.setDisplaySize(MARBLE_RADIUS * 2, MARBLE_RADIUS * 2);
       const dir = Phaser.Math.FloatBetween(0, TAU);
       img.setVelocity(Math.cos(dir) * MARBLE_SPEED, Math.sin(dir) * MARBLE_SPEED);
-      this.marbles.set(c.code, img);
+      this.marbles.set(code, img);
     });
 
     this.statusText = this.add
-      .text(CENTER.x, 24, '', { fontSize: '24px', color: '#ffffff' })
+      .text(CENTER.x, 16, '', { fontSize: '24px', color: '#ffffff' })
       .setOrigin(0.5, 0);
+    this.buildPanel();
     this.updateStatus();
+  }
+
+  private roundLabel(): string {
+    return this.tournament.isFinale
+      ? 'Finále'
+      : `Kolo ${this.tournament.round}/${this.tournament.rounds}`;
+  }
+
+  /** Left-hand list: one row per qualifying round plus the finale, filled in as winners are known. */
+  private buildPanel(): void {
+    const { rounds, winners, champion } = this.tournament;
+    this.add.text(PANEL_X, 24, 'Vítězové kol', {
+      fontSize: '28px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
+
+    for (let i = 0; i <= rounds; i++) {
+      const y = PANEL_ROW_Y + i * PANEL_ROW_HEIGHT;
+      const label = i < rounds ? `${i + 1}. kolo` : 'Finále';
+      const text = this.add.text(PANEL_X + 44, y, '', { fontSize: '22px', color: '#ffffff' });
+      this.panelRows.push({ icon: null, text });
+      const winner = i < rounds ? winners[i] : champion;
+      this.setPanelRow(i, label, winner ?? null);
+    }
+  }
+
+  private setPanelRow(index: number, label: string, code: string | null): void {
+    const row = this.panelRows[index]!;
+    const y = PANEL_ROW_Y + index * PANEL_ROW_HEIGHT;
+    row.icon?.destroy();
+    row.icon = null;
+    if (code) {
+      row.icon = this.add.image(PANEL_X + 16, y + 14, `marble-${code}`).setDisplaySize(32, 32);
+      row.text.setText(`${label} – ${countryName(code)}`).setColor('#ffffff');
+    } else {
+      row.text.setText(`${label} – ?`).setColor('#6b6f85');
+    }
   }
 
   update(_time: number, delta: number): void {
@@ -97,6 +162,8 @@ export class ArenaScene extends Phaser.Scene {
         this.tracker.eliminate(code);
         img.destroy();
         this.marbles.delete(code);
+        // If several marbles leave in the same frame, stop at the first moment one is left.
+        if (this.tracker.winner) break;
         continue;
       }
       // Without gravity or friction, keep every marble at constant speed.
@@ -114,18 +181,40 @@ export class ArenaScene extends Phaser.Scene {
   private showWinner(code: string): void {
     this.finished = true;
     const img = this.marbles.get(code);
-    const name = COUNTRIES.find((c) => c.code === code)?.name ?? code;
-    this.statusText.setText(`Vítěz: ${name}`);
-    if (!img) return;
-    img.setStatic(true);
-    this.tweens.add({
-      targets: img,
-      x: CENTER.x,
-      y: CENTER.y,
-      scale: img.scale * 3,
-      duration: 800,
-      ease: 'Sine.easeInOut',
-    });
+    const label = this.roundLabel();
+    const rowIndex = this.tournament.isFinale ? this.tournament.rounds : this.tournament.round - 1;
+    this.tournament.recordWinner(code);
+    this.setPanelRow(
+      rowIndex,
+      rowIndex < this.tournament.rounds ? `${rowIndex + 1}. kolo` : 'Finále',
+      code,
+    );
+
+    if (this.tournament.isComplete) {
+      this.statusText.setText(`Šampion: ${countryName(code)} – klikni pro novou hru`);
+    } else {
+      this.statusText.setText(`${label} – vítěz: ${countryName(code)}`);
+    }
+
+    if (img) {
+      img.setStatic(true);
+      this.tweens.add({
+        targets: img,
+        x: CENTER.x,
+        y: CENTER.y,
+        scale: img.scale * 3,
+        duration: 800,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    if (this.tournament.isComplete) {
+      this.input.once('pointerdown', () => this.scene.restart({}));
+    } else {
+      this.time.delayedCall(NEXT_ROUND_DELAY, () =>
+        this.scene.restart({ tournament: this.tournament }),
+      );
+    }
   }
 
   /** Static obstacles inside the ring that marbles bounce off. */
@@ -199,6 +288,6 @@ export class ArenaScene extends Phaser.Scene {
 
   private updateStatus(): void {
     if (this.finished) return;
-    this.statusText.setText(`Zbývá: ${this.tracker.remaining.length}`);
+    this.statusText.setText(`${this.roundLabel()} · Zbývá: ${this.tracker.remaining.length}`);
   }
 }

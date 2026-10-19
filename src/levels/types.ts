@@ -20,6 +20,7 @@ interface BaseLevel {
 /** Marbles inside a (rotating) ring; they drop out through holes. */
 export interface RingLevel extends BaseLevel {
   kind: 'ring';
+  center: { x: number; y: number };
   radius: number;
   rotationSpeed: number; // rad/s
   holes: { angle: number; width: number }[]; // angle in rad, width in rad
