@@ -2,7 +2,7 @@
  * Pure tournament rules – no Phaser dependency.
  *
  * `rounds` qualifying rounds are played with the whole pool, minus the winners of the
- * previous rounds (round 1 = 50 flags, round 2 = 49, ...). Each round winner advances to
+ * previous rounds (round 1 = the whole pool, round 2 = one fewer, ...). Each round winner advances to
  * the finale, which is contested by the round winners only.
  */
 export class Tournament {

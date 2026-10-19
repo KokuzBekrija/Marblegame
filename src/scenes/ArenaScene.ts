@@ -9,12 +9,11 @@ const CENTER = arenaRing.center;
 const MARBLE_RADIUS = 16;
 const WALL_THICKNESS = 24;
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
-const POOL_SIZE = 50; // flags drawn at the start of a tournament
 const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
 const PANEL_X = 24;
 const PANEL_ROW_Y = 84;
 const PANEL_ROW_HEIGHT = 48;
-const SPAWN_SPACING = 24; // sunflower spiral scale; neighbours end up ~34px apart
+const SPAWN_SPACING = 19; // sunflower spiral scale; the first-round field (all flags) must fit
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const MARBLE_SPEED = 3.5; // px per physics step
 const SEGMENTS = 120; // ring resolution
@@ -52,12 +51,7 @@ export class ArenaScene extends Phaser.Scene {
 
   init(data: { tournament?: Tournament }): void {
     this.tournament =
-      data.tournament ??
-      new Tournament(
-        Phaser.Utils.Array.Shuffle([...COUNTRIES])
-          .slice(0, POOL_SIZE)
-          .map((c) => c.code),
-      );
+      data.tournament ?? new Tournament(COUNTRIES.map((c) => c.code));
   }
 
   create(): void {
@@ -76,13 +70,11 @@ export class ArenaScene extends Phaser.Scene {
     const ids = Phaser.Utils.Array.Shuffle(this.tournament.participants);
     this.tracker = new EliminationTracker(ids);
 
+    const spawn = this.spawnPoints(ids.length);
     ids.forEach((code, i) => {
-      // Sunflower spiral keeps the marbles evenly spread and non-overlapping at the start.
-      const a = i * GOLDEN_ANGLE;
-      const r = SPAWN_SPACING * Math.sqrt(i + 0.5);
       const img = this.matter.add.image(
-        CENTER.x + Math.cos(a) * r,
-        CENTER.y + Math.sin(a) * r,
+        spawn[i]!.x,
+        spawn[i]!.y,
         `marble-${code}`,
         undefined,
         {
@@ -107,6 +99,27 @@ export class ArenaScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
     this.buildPanel();
     this.updateStatus();
+  }
+
+  /**
+   * Start positions on a sunflower spiral, which spreads the marbles evenly without overlaps.
+   * Points that would land on an obstacle or touch the ring are skipped.
+   */
+  private spawnPoints(count: number): { x: number; y: number }[] {
+    const maxR = this.level.radius - WALL_THICKNESS / 2 - MARBLE_RADIUS - 4;
+    const points: { x: number; y: number }[] = [];
+    for (let i = 0; points.length < count; i++) {
+      const a = i * GOLDEN_ANGLE;
+      const r = SPAWN_SPACING * Math.sqrt(i + 0.5);
+      if (r > maxR) throw new Error(`Cannot fit ${count} marbles in the arena`);
+      const x = CENTER.x + Math.cos(a) * r;
+      const y = CENTER.y + Math.sin(a) * r;
+      const blocked = this.level.obstacles.some(
+        (o) => Math.hypot(o.x - x, o.y - y) < Math.max(o.w, o.h) / 2 + MARBLE_RADIUS + 2,
+      );
+      if (!blocked) points.push({ x, y });
+    }
+    return points;
   }
 
   private marbleOf(body: MatterJS.BodyType): Phaser.Physics.Matter.Image | null {
