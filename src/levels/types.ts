@@ -1,10 +1,20 @@
 /** Data-driven level definitions so new levels need no scene code. */
 export type LevelConfig = RingLevel | RaceLevel;
 
+/** Static obstacle; `diamond` is a rhombus with diagonals `w` (horizontal) and `h` (vertical). */
+export interface Obstacle {
+  shape?: 'bar' | 'diamond'; // default 'bar'
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  angle?: number; // rad
+}
+
 interface BaseLevel {
   id: string;
   name: string;
-  obstacles: { x: number; y: number; w: number; h: number; angle?: number }[];
+  obstacles: Obstacle[];
 }
 
 /** Marbles inside a (rotating) ring; they drop out through holes. */

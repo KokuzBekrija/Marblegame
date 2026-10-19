@@ -11,7 +11,7 @@ const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
 const MARBLE_COUNT = 50;
 const SPAWN_SPACING = 24; // sunflower spiral scale; neighbours end up ~34px apart
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const MARBLE_SPEED = 5; // px per physics step
+const MARBLE_SPEED = 3.5; // px per physics step
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
 
@@ -132,8 +132,26 @@ export class ArenaScene extends Phaser.Scene {
   private buildObstacles(level: RingLevel): void {
     for (const o of level.obstacles) {
       const angle = o.angle ?? 0;
-      this.matter.add.rectangle(o.x, o.y, o.w, o.h, { isStatic: true, angle, restitution: 1 });
-      this.add.rectangle(o.x, o.y, o.w, o.h, 0xe0a458).setRotation(angle);
+      const opts = { isStatic: true, angle, restitution: 1 };
+      if (o.shape === 'diamond') {
+        const hw = o.w / 2;
+        const hh = o.h / 2;
+        this.matter.add.fromVertices(
+          o.x,
+          o.y,
+          [
+            { x: 0, y: -hh },
+            { x: hw, y: 0 },
+            { x: 0, y: hh },
+            { x: -hw, y: 0 },
+          ],
+          opts,
+        );
+        this.add.polygon(o.x, o.y, [hw, 0, o.w, hh, hw, o.h, 0, hh], 0x4fc3a1).setRotation(angle);
+      } else {
+        this.matter.add.rectangle(o.x, o.y, o.w, o.h, opts);
+        this.add.rectangle(o.x, o.y, o.w, o.h, 0xe0a458).setRotation(angle);
+      }
     }
   }
 
