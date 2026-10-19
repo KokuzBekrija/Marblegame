@@ -7,6 +7,8 @@ import type { RingLevel } from '../levels/types';
 const CENTER = { x: 450, y: 450 };
 const MARBLE_RADIUS = 16;
 const WALL_THICKNESS = 24;
+const SPAWN_RADIUS = 60;
+const MARBLE_SPEED = 5; // px per physics step
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
 
@@ -33,21 +35,33 @@ export class ArenaScene extends Phaser.Scene {
   create(): void {
     this.finished = false;
     this.marbles.clear();
+    // Top-down arena: no gravity, marbles keep moving and bounce off walls and obstacles.
+    this.matter.world.setGravity(0, 0);
     this.ring = this.buildRing(this.level);
     this.ringGfx = this.drawRing(this.level);
+    this.buildObstacles(this.level);
 
     const ids = COUNTRIES.slice(0, 8);
     this.tracker = new EliminationTracker(ids.map((c) => c.code));
 
     ids.forEach((c, i) => {
+      const a = (i / ids.length) * TAU;
       const img = this.matter.add.image(
-        CENTER.x + (i - ids.length / 2) * 36,
-        CENTER.y - 120,
+        CENTER.x + Math.cos(a) * SPAWN_RADIUS,
+        CENTER.y + Math.sin(a) * SPAWN_RADIUS,
         `marble-${c.code}`,
         undefined,
-        { shape: { type: 'circle', radius: MARBLE_RADIUS }, restitution: 0.8, friction: 0.05 },
+        {
+          shape: { type: 'circle', radius: MARBLE_RADIUS },
+          restitution: 1,
+          friction: 0,
+          frictionStatic: 0,
+          frictionAir: 0,
+        },
       );
       img.setDisplaySize(MARBLE_RADIUS * 2, MARBLE_RADIUS * 2);
+      const dir = Phaser.Math.FloatBetween(0, TAU);
+      img.setVelocity(Math.cos(dir) * MARBLE_SPEED, Math.sin(dir) * MARBLE_SPEED);
       this.marbles.set(c.code, img);
     });
 
@@ -77,14 +91,43 @@ export class ArenaScene extends Phaser.Scene {
         this.tracker.eliminate(code);
         img.destroy();
         this.marbles.delete(code);
+        continue;
       }
+      // Without gravity or friction, keep every marble at constant speed.
+      const v = img.body!.velocity;
+      const speed = Math.hypot(v.x, v.y);
+      if (speed > 0.01) img.setVelocity((v.x / speed) * MARBLE_SPEED, (v.y / speed) * MARBLE_SPEED);
     }
     this.updateStatus();
 
-    if (this.tracker.winner) {
-      this.finished = true;
-      const winner = COUNTRIES.find((c) => c.code === this.tracker.winner);
-      this.statusText.setText(`Vítěz: ${winner?.name ?? this.tracker.winner}`);
+    const winnerCode = this.tracker.winner;
+    if (winnerCode) this.showWinner(winnerCode);
+  }
+
+  /** The last marble stays in the arena: it is frozen and glides to the center. */
+  private showWinner(code: string): void {
+    this.finished = true;
+    const img = this.marbles.get(code);
+    const name = COUNTRIES.find((c) => c.code === code)?.name ?? code;
+    this.statusText.setText(`Vítěz: ${name}`);
+    if (!img) return;
+    img.setStatic(true);
+    this.tweens.add({
+      targets: img,
+      x: CENTER.x,
+      y: CENTER.y,
+      scale: img.scale * 3,
+      duration: 800,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  /** Static obstacles inside the ring that marbles bounce off. */
+  private buildObstacles(level: RingLevel): void {
+    for (const o of level.obstacles) {
+      const angle = o.angle ?? 0;
+      this.matter.add.rectangle(o.x, o.y, o.w, o.h, { isStatic: true, angle, restitution: 1 });
+      this.add.rectangle(o.x, o.y, o.w, o.h, 0xe0a458).setRotation(angle);
     }
   }
 
