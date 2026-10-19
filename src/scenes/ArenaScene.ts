@@ -7,6 +7,7 @@ import type { RingLevel } from '../levels/types';
 const CENTER = { x: 450, y: 450 };
 const MARBLE_RADIUS = 16;
 const WALL_THICKNESS = 24;
+const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
 const SPAWN_RADIUS = 60;
 const MARBLE_SPEED = 5; // px per physics step
 const SEGMENTS = 120; // ring resolution
@@ -52,7 +53,8 @@ export class ArenaScene extends Phaser.Scene {
         `marble-${c.code}`,
         undefined,
         {
-          shape: { type: 'circle', radius: MARBLE_RADIUS },
+          // Body is built at texture size; setDisplaySize below scales it down to MARBLE_RADIUS.
+          shape: { type: 'circle', radius: MARBLE_TEXTURE_SIZE / 2 },
           restitution: 1,
           friction: 0,
           frictionStatic: 0,
