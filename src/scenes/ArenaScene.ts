@@ -66,7 +66,7 @@ export class ArenaScene extends Phaser.Scene {
     this.marbles.clear();
     // Top-down arena: no gravity, marbles keep moving and bounce off walls and obstacles.
     this.matter.world.setGravity(0, 0);
-    // Matter's own restitution is too weak here (marbles slide along walls), so bounce manually.
+    // Matter's own solver leaves marbles sliding along walls, so bounces are computed manually.
     this.matter.world.on('collisionstart', this.onCollide, this);
     this.matter.world.on('collisionactive', this.onCollide, this);
     this.ring = this.buildRing(this.level);
@@ -88,6 +88,7 @@ export class ArenaScene extends Phaser.Scene {
         {
           // Body is built at texture size; setDisplaySize below scales it down to MARBLE_RADIUS.
           shape: { type: 'circle', radius: MARBLE_TEXTURE_SIZE / 2 },
+          isSensor: true, // collisions are reported but resolved manually, see onCollide
           restitution: 1,
           friction: 0,
           frictionStatic: 0,
@@ -113,80 +114,71 @@ export class ArenaScene extends Phaser.Scene {
     return go?.getData?.('marble') === true ? go : null;
   }
 
+  /**
+   * Marbles are sensors: Matter only reports the overlaps and does not resolve them, so the
+   * bounce below is the only response (Matter's own solver leaves marbles sliding along walls).
+   */
   private onCollide(event: {
-    pairs: { bodyA: MatterJS.BodyType; bodyB: MatterJS.BodyType }[];
+    pairs: {
+      bodyA: MatterJS.BodyType;
+      bodyB: MatterJS.BodyType;
+      collision: { normal: { x: number; y: number }; depth: number };
+    }[];
   }): void {
-    for (const { bodyA, bodyB } of event.pairs) {
+    for (const { bodyA, bodyB, collision } of event.pairs) {
       const a = this.marbleOf(bodyA);
       const b = this.marbleOf(bodyB);
-      if (a && b) this.bounceMarbles(a, b);
-      else if (a) this.bounceOffWall(a, bodyB);
-      else if (b) this.bounceOffWall(b, bodyA);
+      const { normal, depth } = collision; // normal points from bodyA to bodyB
+      if (a && b) this.bounceMarbles(a, b, normal, depth);
+      else if (a) this.bounceOffWall(a, { x: -normal.x, y: -normal.y }, depth);
+      else if (b) this.bounceOffWall(b, normal, depth);
     }
   }
 
-  /** Mirrors the marble's velocity about the wall surface (angle of incidence = angle of reflection). */
-  private bounceOffWall(marble: Phaser.Physics.Matter.Image, wall: MatterJS.BodyType): void {
+  /** Pushes the marble out of the wall and mirrors its velocity about the wall surface. */
+  private bounceOffWall(
+    marble: Phaser.Physics.Matter.Image,
+    n: { x: number; y: number }, // points from the wall towards the marble
+    depth: number,
+  ): void {
     const body = marble.body as MatterJS.BodyType;
-    // Contact normal points from the marble towards the wall: the wall's center always lies
-    // behind the face the marble touches, so the vector between the centers picks the sign.
-    const dx = wall.position.x - body.position.x;
-    const dy = wall.position.y - body.position.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist === 0) return;
-    const n = this.contactNormal(marble, wall, dx / dist, dy / dist);
+    this.matter.body.setPosition(
+      body,
+      { x: body.position.x + n.x * depth, y: body.position.y + n.y * depth },
+      false,
+    );
     const { x: vx, y: vy } = body.velocity;
     const vn = vx * n.x + vy * n.y;
-    if (vn <= 0) return; // already moving away
+    if (vn >= 0) return; // already moving away
     marble.setVelocity(vx - 2 * vn * n.x, vy - 2 * vn * n.y);
   }
 
   /** Elastic collision of two equal masses: they swap their velocity along the contact line. */
-  private bounceMarbles(a: Phaser.Physics.Matter.Image, b: Phaser.Physics.Matter.Image): void {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist === 0) return;
-    const nx = dx / dist;
-    const ny = dy / dist;
-    const va = a.body!.velocity;
-    const vb = b.body!.velocity;
-    const approach = (va.x - vb.x) * nx + (va.y - vb.y) * ny;
+  private bounceMarbles(
+    a: Phaser.Physics.Matter.Image,
+    b: Phaser.Physics.Matter.Image,
+    n: { x: number; y: number }, // points from a to b
+    depth: number,
+  ): void {
+    const ba = a.body as MatterJS.BodyType;
+    const bb = b.body as MatterJS.BodyType;
+    const half = depth / 2;
+    this.matter.body.setPosition(
+      ba,
+      { x: ba.position.x - n.x * half, y: ba.position.y - n.y * half },
+      false,
+    );
+    this.matter.body.setPosition(
+      bb,
+      { x: bb.position.x + n.x * half, y: bb.position.y + n.y * half },
+      false,
+    );
+    const va = ba.velocity;
+    const vb = bb.velocity;
+    const approach = (va.x - vb.x) * n.x + (va.y - vb.y) * n.y;
     if (approach <= 0) return; // already separating
-    a.setVelocity(va.x - approach * nx, va.y - approach * ny);
-    b.setVelocity(vb.x + approach * nx, vb.y + approach * ny);
-  }
-
-  /** The collision normal Matter reports for this marble/wall pair, oriented towards the wall. */
-  private contactNormal(
-    marble: Phaser.Physics.Matter.Image,
-    wall: MatterJS.BodyType,
-    fallbackX: number,
-    fallbackY: number,
-  ): { x: number; y: number } {
-    const pairs = (
-      this.matter.world.engine.pairs as unknown as {
-        list: {
-          isActive: boolean;
-          bodyA: MatterJS.BodyType;
-          bodyB: MatterJS.BodyType;
-          collision: { normal: { x: number; y: number } };
-        }[];
-      }
-    ).list;
-    const body = marble.body as MatterJS.BodyType;
-    for (const p of pairs) {
-      if (!p.isActive) continue;
-      if ((p.bodyA === body && p.bodyB === wall) || (p.bodyA === wall && p.bodyB === body)) {
-        const n = p.collision.normal;
-        const sign =
-          n.x * (wall.position.x - body.position.x) + n.y * (wall.position.y - body.position.y) >= 0
-            ? 1
-            : -1;
-        return { x: n.x * sign, y: n.y * sign };
-      }
-    }
-    return { x: fallbackX, y: fallbackY };
+    a.setVelocity(va.x - approach * n.x, va.y - approach * n.y);
+    b.setVelocity(vb.x + approach * n.x, vb.y + approach * n.y);
   }
 
   private roundLabel(): string {
