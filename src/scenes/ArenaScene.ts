@@ -128,7 +128,16 @@ export class ArenaScene extends Phaser.Scene {
     for (const { bodyA, bodyB, collision } of event.pairs) {
       const a = this.marbleOf(bodyA);
       const b = this.marbleOf(bodyB);
-      const { normal, depth } = collision; // normal points from bodyA to bodyB
+      const { depth } = collision;
+      // Orient the normal from bodyA to bodyB by the body centers instead of trusting Matter's
+      // sign convention: the center of a body always lies on the outer side of the face it touches.
+      const sign =
+        collision.normal.x * (bodyB.position.x - bodyA.position.x) +
+          collision.normal.y * (bodyB.position.y - bodyA.position.y) >=
+        0
+          ? 1
+          : -1;
+      const normal = { x: collision.normal.x * sign, y: collision.normal.y * sign };
       if (a && b) this.bounceMarbles(a, b, normal, depth);
       else if (a) this.bounceOffWall(a, { x: -normal.x, y: -normal.y }, depth);
       else if (b) this.bounceOffWall(b, normal, depth);
