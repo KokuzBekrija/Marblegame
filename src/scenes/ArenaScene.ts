@@ -8,7 +8,9 @@ const CENTER = { x: 450, y: 450 };
 const MARBLE_RADIUS = 16;
 const WALL_THICKNESS = 24;
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
-const SPAWN_RADIUS = 60;
+const MARBLE_COUNT = 50;
+const SPAWN_SPACING = 24; // sunflower spiral scale; neighbours end up ~34px apart
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const MARBLE_SPEED = 5; // px per physics step
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
@@ -42,14 +44,16 @@ export class ArenaScene extends Phaser.Scene {
     this.ringGfx = this.drawRing(this.level);
     this.buildObstacles(this.level);
 
-    const ids = COUNTRIES.slice(0, 8);
+    const ids = Phaser.Utils.Array.Shuffle([...COUNTRIES]).slice(0, MARBLE_COUNT);
     this.tracker = new EliminationTracker(ids.map((c) => c.code));
 
     ids.forEach((c, i) => {
-      const a = (i / ids.length) * TAU;
+      // Sunflower spiral keeps the marbles evenly spread and non-overlapping at the start.
+      const a = i * GOLDEN_ANGLE;
+      const r = SPAWN_SPACING * Math.sqrt(i + 0.5);
       const img = this.matter.add.image(
-        CENTER.x + Math.cos(a) * SPAWN_RADIUS,
-        CENTER.y + Math.sin(a) * SPAWN_RADIUS,
+        CENTER.x + Math.cos(a) * r,
+        CENTER.y + Math.sin(a) * r,
         `marble-${c.code}`,
         undefined,
         {
