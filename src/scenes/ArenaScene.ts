@@ -66,6 +66,9 @@ export class ArenaScene extends Phaser.Scene {
     this.marbles.clear();
     // Top-down arena: no gravity, marbles keep moving and bounce off walls and obstacles.
     this.matter.world.setGravity(0, 0);
+    // Matter's own restitution is too weak here (marbles slide along walls), so bounce manually.
+    this.matter.world.on('collisionstart', this.onCollide, this);
+    this.matter.world.on('collisionactive', this.onCollide, this);
     this.ring = this.buildRing(this.level);
     this.ringGfx = this.drawRing(this.level);
     this.buildObstacles(this.level);
@@ -92,6 +95,7 @@ export class ArenaScene extends Phaser.Scene {
         },
       );
       img.setDisplaySize(MARBLE_RADIUS * 2, MARBLE_RADIUS * 2);
+      img.setData('marble', true);
       const dir = Phaser.Math.FloatBetween(0, TAU);
       img.setVelocity(Math.cos(dir) * MARBLE_SPEED, Math.sin(dir) * MARBLE_SPEED);
       this.marbles.set(code, img);
@@ -102,6 +106,87 @@ export class ArenaScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
     this.buildPanel();
     this.updateStatus();
+  }
+
+  private marbleOf(body: MatterJS.BodyType): Phaser.Physics.Matter.Image | null {
+    const go = body.gameObject as Phaser.Physics.Matter.Image | null | undefined;
+    return go?.getData?.('marble') === true ? go : null;
+  }
+
+  private onCollide(event: {
+    pairs: { bodyA: MatterJS.BodyType; bodyB: MatterJS.BodyType }[];
+  }): void {
+    for (const { bodyA, bodyB } of event.pairs) {
+      const a = this.marbleOf(bodyA);
+      const b = this.marbleOf(bodyB);
+      if (a && b) this.bounceMarbles(a, b);
+      else if (a) this.bounceOffWall(a, bodyB);
+      else if (b) this.bounceOffWall(b, bodyA);
+    }
+  }
+
+  /** Mirrors the marble's velocity about the wall surface (angle of incidence = angle of reflection). */
+  private bounceOffWall(marble: Phaser.Physics.Matter.Image, wall: MatterJS.BodyType): void {
+    const body = marble.body as MatterJS.BodyType;
+    // Contact normal points from the marble towards the wall: the wall's center always lies
+    // behind the face the marble touches, so the vector between the centers picks the sign.
+    const dx = wall.position.x - body.position.x;
+    const dy = wall.position.y - body.position.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) return;
+    const n = this.contactNormal(marble, wall, dx / dist, dy / dist);
+    const { x: vx, y: vy } = body.velocity;
+    const vn = vx * n.x + vy * n.y;
+    if (vn <= 0) return; // already moving away
+    marble.setVelocity(vx - 2 * vn * n.x, vy - 2 * vn * n.y);
+  }
+
+  /** Elastic collision of two equal masses: they swap their velocity along the contact line. */
+  private bounceMarbles(a: Phaser.Physics.Matter.Image, b: Phaser.Physics.Matter.Image): void {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) return;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const va = a.body!.velocity;
+    const vb = b.body!.velocity;
+    const approach = (va.x - vb.x) * nx + (va.y - vb.y) * ny;
+    if (approach <= 0) return; // already separating
+    a.setVelocity(va.x - approach * nx, va.y - approach * ny);
+    b.setVelocity(vb.x + approach * nx, vb.y + approach * ny);
+  }
+
+  /** The collision normal Matter reports for this marble/wall pair, oriented towards the wall. */
+  private contactNormal(
+    marble: Phaser.Physics.Matter.Image,
+    wall: MatterJS.BodyType,
+    fallbackX: number,
+    fallbackY: number,
+  ): { x: number; y: number } {
+    const pairs = (
+      this.matter.world.engine.pairs as unknown as {
+        list: {
+          isActive: boolean;
+          bodyA: MatterJS.BodyType;
+          bodyB: MatterJS.BodyType;
+          collision: { normal: { x: number; y: number } };
+        }[];
+      }
+    ).list;
+    const body = marble.body as MatterJS.BodyType;
+    for (const p of pairs) {
+      if (!p.isActive) continue;
+      if ((p.bodyA === body && p.bodyB === wall) || (p.bodyA === wall && p.bodyB === body)) {
+        const n = p.collision.normal;
+        const sign =
+          n.x * (wall.position.x - body.position.x) + n.y * (wall.position.y - body.position.y) >= 0
+            ? 1
+            : -1;
+        return { x: n.x * sign, y: n.y * sign };
+      }
+    }
+    return { x: fallbackX, y: fallbackY };
   }
 
   private roundLabel(): string {
