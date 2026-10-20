@@ -249,16 +249,23 @@ export abstract class TournamentScene extends Phaser.Scene {
   }
 
   private buildMenuLink(): void {
+    const leave = () => this.scene.start('Menu');
     this.add
-      .text(PANEL_X, 2, '< Menu', { fontSize: '16px', color: '#9aa0c0' })
+      .text(PANEL_X, 8, '< Menu (Esc)', {
+        fontSize: '16px',
+        color: '#ffffff',
+        backgroundColor: '#323859',
+        padding: { x: 10, y: 5 },
+      })
       .setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.scene.start('Menu'));
+      .on('pointerdown', leave);
+    this.input.keyboard?.once('keydown-ESC', leave);
   }
 
   /** Left-hand list: one row per qualifying round plus the finale, filled in as winners are known. */
   private buildPanel(fieldSize: number): void {
     const { rounds, winners, champion } = this.tournament;
-    this.add.text(PANEL_X, 24, 'Round winners', {
+    this.add.text(PANEL_X, 42, 'Round winners', {
       fontSize: '28px',
       color: '#ffffff',
       fontStyle: 'bold',
