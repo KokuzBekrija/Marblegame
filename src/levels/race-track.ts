@@ -3,7 +3,7 @@ import type { RaceLevel } from './types';
 export const raceTrack: RaceLevel = {
   kind: 'race',
   id: 'race-track',
-  name: 'Závod překážkami',
+  name: 'Obstacle race',
   startLineY: 60,
   finishLineY: 2400,
   trackWidth: 700,

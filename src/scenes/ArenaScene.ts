@@ -107,7 +107,7 @@ export class ArenaScene extends Phaser.Scene {
       .text(CENTER.x, 16, '', { fontSize: '24px', color: '#ffffff' })
       .setOrigin(0.5, 0);
     this.buildPanel();
-    this.add.text(PANEL_X, OUT_TOP - 4, 'Vyřazení – pořadí', {
+    this.add.text(PANEL_X, OUT_TOP - 4, 'Eliminated – final place', {
       fontSize: '18px',
       color: '#ffffff',
       fontStyle: 'bold',
@@ -237,14 +237,14 @@ export class ArenaScene extends Phaser.Scene {
 
   private roundLabel(): string {
     return this.tournament.isFinale
-      ? 'Finále'
-      : `Kolo ${this.tournament.round}/${this.tournament.rounds}`;
+      ? 'Final'
+      : `Round ${this.tournament.round}/${this.tournament.rounds}`;
   }
 
   /** Left-hand list: one row per qualifying round plus the finale, filled in as winners are known. */
   private buildPanel(): void {
     const { rounds, winners, champion } = this.tournament;
-    this.add.text(PANEL_X, 24, 'Vítězové kol', {
+    this.add.text(PANEL_X, 24, 'Round winners', {
       fontSize: '28px',
       color: '#ffffff',
       fontStyle: 'bold',
@@ -252,7 +252,7 @@ export class ArenaScene extends Phaser.Scene {
 
     for (let i = 0; i <= rounds; i++) {
       const y = PANEL_ROW_Y + i * PANEL_ROW_HEIGHT;
-      const label = i < rounds ? `${i + 1}. kolo` : 'Finále';
+      const label = i < rounds ? `Round ${i + 1}` : 'Final';
       const text = this.add.text(PANEL_X + 44, y, '', { fontSize: '22px', color: '#ffffff' });
       this.panelRows.push({ icon: null, text });
       const winner = i < rounds ? winners[i] : champion;
@@ -319,14 +319,14 @@ export class ArenaScene extends Phaser.Scene {
     this.addToOutList(code);
     this.setPanelRow(
       rowIndex,
-      rowIndex < this.tournament.rounds ? `${rowIndex + 1}. kolo` : 'Finále',
+      rowIndex < this.tournament.rounds ? `Round ${rowIndex + 1}` : 'Final',
       code,
     );
 
     if (this.tournament.isComplete) {
-      this.statusText.setText(`Šampion: ${countryName(code)} – klikni pro novou hru`);
+      this.statusText.setText(`Champion: ${countryName(code)} – click to start a new game`);
     } else {
-      this.statusText.setText(`${label} – vítěz: ${countryName(code)}`);
+      this.statusText.setText(`${label} – winner: ${countryName(code)}`);
     }
 
     if (img) {
@@ -421,6 +421,6 @@ export class ArenaScene extends Phaser.Scene {
 
   private updateStatus(): void {
     if (this.finished) return;
-    this.statusText.setText(`${this.roundLabel()} · Zbývá: ${this.tracker.remaining.length}`);
+    this.statusText.setText(`${this.roundLabel()} · Remaining: ${this.tracker.remaining.length}`);
   }
 }

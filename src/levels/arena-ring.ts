@@ -24,7 +24,7 @@ const diamonds: Obstacle[] = Array.from({ length: 8 }, (_, k) => {
 export const arenaRing: RingLevel = {
   kind: 'ring',
   id: 'arena-ring',
-  name: 'Rotující kruh',
+  name: 'Rotating ring',
   center: CENTER,
   radius: 380,
   rotationSpeed: 0.4,
