@@ -1,13 +1,12 @@
 import Phaser from 'phaser';
 import { COUNTRIES } from '../data/countries';
 import { EliminationTracker } from '../core/elimination';
+import { MARBLE_RADIUS, WALL_THICKNESS, ringSpawnPoints } from '../core/spawn';
 import { Tournament } from '../core/tournament';
 import { arenaRing } from '../levels/arena-ring';
 import type { RingLevel } from '../levels/types';
 
 const CENTER = arenaRing.center;
-const MARBLE_RADIUS = 16;
-const WALL_THICKNESS = 24;
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
 const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
 const PANEL_X = 24;
@@ -20,8 +19,9 @@ const OUT_ROWS = 5;
 const OUT_CELL_W = (1200 - 2 * PANEL_X) / OUT_COLS;
 const OUT_CELL_H = 34;
 const OUT_FLAG_SIZE = 20;
-const SPAWN_SPACING = 19; // sunflower spiral scale; the first-round field (all flags) must fit
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+// The finale (5 flags) lists the full ranking with names, larger than the strip of normal rounds.
+const FINAL_ROW_HEIGHT = 34;
+const FINAL_FLAG_SIZE = 30;
 const MARBLE_SPEED = 3.5; // px per physics step
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
@@ -52,14 +52,14 @@ export class ArenaScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private finished = false;
   private outCount = 0;
+  private finalSlots: Phaser.GameObjects.Text[] = [];
 
   constructor() {
     super('Arena');
   }
 
   init(data: { tournament?: Tournament }): void {
-    this.tournament =
-      data.tournament ?? new Tournament(COUNTRIES.map((c) => c.code));
+    this.tournament = data.tournament ?? new Tournament(COUNTRIES.map((c) => c.code));
   }
 
   create(): void {
@@ -79,23 +79,17 @@ export class ArenaScene extends Phaser.Scene {
     const ids = Phaser.Utils.Array.Shuffle(this.tournament.participants);
     this.tracker = new EliminationTracker(ids);
 
-    const spawn = this.spawnPoints(ids.length);
+    const spawn = ringSpawnPoints(ids.length, this.level);
     ids.forEach((code, i) => {
-      const img = this.matter.add.image(
-        spawn[i]!.x,
-        spawn[i]!.y,
-        `marble-${code}`,
-        undefined,
-        {
-          // Body is built at texture size; setDisplaySize below scales it down to MARBLE_RADIUS.
-          shape: { type: 'circle', radius: MARBLE_TEXTURE_SIZE / 2 },
-          isSensor: true, // collisions are reported but resolved manually, see onCollide
-          restitution: 1,
-          friction: 0,
-          frictionStatic: 0,
-          frictionAir: 0,
-        },
-      );
+      const img = this.matter.add.image(spawn[i]!.x, spawn[i]!.y, `marble-${code}`, undefined, {
+        // Body is built at texture size; setDisplaySize below scales it down to MARBLE_RADIUS.
+        shape: { type: 'circle', radius: MARBLE_TEXTURE_SIZE / 2 },
+        isSensor: true, // collisions are reported but resolved manually, see onCollide
+        restitution: 1,
+        friction: 0,
+        frictionStatic: 0,
+        frictionAir: 0,
+      });
       img.setDisplaySize(MARBLE_RADIUS * 2, MARBLE_RADIUS * 2);
       img.setData('marble', true);
       const dir = Phaser.Math.FloatBetween(0, TAU);
@@ -107,18 +101,52 @@ export class ArenaScene extends Phaser.Scene {
       .text(CENTER.x, 16, '', { fontSize: '24px', color: '#ffffff' })
       .setOrigin(0.5, 0);
     this.buildPanel();
-    this.add.text(PANEL_X, OUT_TOP - 4, 'Eliminated – final place', {
+    const finale = this.tournament.isFinale;
+    this.add.text(PANEL_X, OUT_TOP - 4, finale ? 'Final ranking' : 'Eliminated – final place', {
       fontSize: '18px',
       color: '#ffffff',
       fontStyle: 'bold',
     });
+    if (finale) {
+      this.finalSlots = [];
+      for (let place = 1; place <= ids.length; place++) {
+        this.finalSlots.push(
+          this.add.text(PANEL_X + FINAL_FLAG_SIZE + 12, this.finalRowY(place) - 14, `${place}. ?`, {
+            fontSize: '26px',
+            color: '#6b6f85',
+          }),
+        );
+      }
+    }
     this.updateStatus();
+  }
+
+  private finalRowY(place: number): number {
+    return OUT_TOP + 38 + (place - 1) * FINAL_ROW_HEIGHT;
+  }
+
+  /** Finale: writes the flag and name into the row of its final place. */
+  private fillFinalSlot(code: string, place: number): void {
+    const slot = this.finalSlots[place - 1];
+    if (!slot) return;
+    this.add
+      .image(PANEL_X + FINAL_FLAG_SIZE / 2, this.finalRowY(place), `marble-${code}`)
+      .setDisplaySize(FINAL_FLAG_SIZE, FINAL_FLAG_SIZE);
+    slot
+      .setText(`${place}. ${countryName(code)}`)
+      .setColor(place === 1 ? '#ffd166' : '#ffffff')
+      .setFontStyle(place === 1 ? 'bold' : 'normal');
   }
 
   /** Appends a flag with its final place to the strip of eliminated flags. */
   private addToOutList(code: string): void {
     const place = this.tracker.placeOf(code);
-    if (place === null || this.outCount >= OUT_COLS * OUT_ROWS) return;
+    if (place === null) return;
+    if (this.tournament.isFinale) {
+      this.fillFinalSlot(code, place);
+      return;
+    }
+    if (this.outCount >= OUT_COLS * OUT_ROWS) return;
     const col = this.outCount % OUT_COLS;
     const row = Math.floor(this.outCount / OUT_COLS);
     this.outCount++;
@@ -131,27 +159,6 @@ export class ArenaScene extends Phaser.Scene {
         color: place === 1 ? '#ffd166' : '#aab0c8',
       })
       .setOrigin(0.5, 0);
-  }
-
-  /**
-   * Start positions on a sunflower spiral, which spreads the marbles evenly without overlaps.
-   * Points that would land on an obstacle or touch the ring are skipped.
-   */
-  private spawnPoints(count: number): { x: number; y: number }[] {
-    const maxR = this.level.radius - WALL_THICKNESS / 2 - MARBLE_RADIUS - 4;
-    const points: { x: number; y: number }[] = [];
-    for (let i = 0; points.length < count; i++) {
-      const a = i * GOLDEN_ANGLE;
-      const r = SPAWN_SPACING * Math.sqrt(i + 0.5);
-      if (r > maxR) throw new Error(`Cannot fit ${count} marbles in the arena`);
-      const x = CENTER.x + Math.cos(a) * r;
-      const y = CENTER.y + Math.sin(a) * r;
-      const blocked = this.level.obstacles.some(
-        (o) => Math.hypot(o.x - x, o.y - y) < Math.max(o.w, o.h) / 2 + MARBLE_RADIUS + 2,
-      );
-      if (!blocked) points.push({ x, y });
-    }
-    return points;
   }
 
   private marbleOf(body: MatterJS.BodyType): Phaser.Physics.Matter.Image | null {

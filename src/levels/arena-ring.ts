@@ -3,23 +3,23 @@ import type { Obstacle, RingLevel } from './types';
 // Ring sits in the upper right of the 1200x1070 canvas; the left part shows the round winners
 // and the strip below the ring lists the eliminated flags.
 const CENTER = { x: 760, y: 450 };
-const DIAMOND_RADIUS = 290;
 
-/** Obstacle positioned relative to the ring center. */
-function at(dx: number, dy: number, rest: Omit<Obstacle, 'x' | 'y'>): Obstacle {
-  return { x: CENTER.x + dx, y: CENTER.y + dy, ...rest };
-}
-
-// Eight rhombi on a circle between the bars and the ring, long diagonal pointing outwards.
-const diamonds: Obstacle[] = Array.from({ length: 8 }, (_, k) => {
-  const a = (Math.PI / 4) * k + Math.PI / 8;
-  return at(Math.cos(a) * DIAMOND_RADIUS, Math.sin(a) * DIAMOND_RADIUS, {
-    shape: 'diamond',
-    w: 34,
-    h: 58,
-    angle: a - Math.PI / 2,
+/** `count` obstacles evenly spaced on a circle around the ring center. */
+function circleOf(
+  count: number,
+  radius: number,
+  phase: number,
+  make: (angle: number) => Omit<Obstacle, 'x' | 'y'>,
+): Obstacle[] {
+  return Array.from({ length: count }, (_, k) => {
+    const a = phase + (k / count) * Math.PI * 2;
+    return {
+      x: CENTER.x + Math.cos(a) * radius,
+      y: CENTER.y + Math.sin(a) * radius,
+      ...make(a),
+    };
   });
-});
+}
 
 export const arenaRing: RingLevel = {
   kind: 'ring',
@@ -34,14 +34,16 @@ export const arenaRing: RingLevel = {
     { angle: 4.2, width: 0.2 },
   ],
   obstacles: [
-    at(0, -200, { w: 84, h: 12 }),
-    at(0, 200, { w: 84, h: 12 }),
-    at(-200, 0, { w: 12, h: 84 }),
-    at(200, 0, { w: 12, h: 84 }),
-    at(-160, -160, { w: 62, h: 12, angle: Math.PI / 4 }),
-    at(160, -160, { w: 62, h: 12, angle: -Math.PI / 4 }),
-    at(-160, 160, { w: 62, h: 12, angle: -Math.PI / 4 }),
-    at(160, 160, { w: 62, h: 12, angle: Math.PI / 4 }),
-    ...diamonds,
+    // Inner pinwheel: bars tilted against the radius so marbles get swirled outwards.
+    ...circleOf(6, 100, 0, (a) => ({ w: 60, h: 12, angle: a + Math.PI / 2 + 0.6 })),
+    // Middle: rhombi with the long diagonal pointing outwards.
+    ...circleOf(12, 200, Math.PI / 12, (a) => ({
+      shape: 'diamond',
+      w: 28,
+      h: 48,
+      angle: a - Math.PI / 2,
+    })),
+    // Outer: short bars along the ring that deflect marbles creeping around the wall.
+    ...circleOf(10, 290, Math.PI / 10, (a) => ({ w: 56, h: 10, angle: a + Math.PI / 2 })),
   ],
 };
