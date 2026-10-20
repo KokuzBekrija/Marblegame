@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { MenuScene } from './scenes/MenuScene';
 import { ArenaScene } from './scenes/ArenaScene';
+import { DropScene } from './scenes/DropScene';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -13,7 +15,7 @@ const game = new Phaser.Game({
     height: 1070,
   },
   physics: { default: 'matter', matter: { gravity: { x: 0, y: 0.6 }, debug: false } },
-  scene: [BootScene, ArenaScene],
+  scene: [BootScene, MenuScene, ArenaScene, DropScene],
 });
 
 // Exposed for e2e tests / debugging in the console.

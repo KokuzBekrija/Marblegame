@@ -38,6 +38,6 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.makeMarbleTextures();
-    this.scene.start('Arena', { levelId: 'arena-ring' });
+    this.scene.start('Menu');
   }
 }
