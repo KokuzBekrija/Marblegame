@@ -13,6 +13,13 @@ const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
 const PANEL_X = 24;
 const PANEL_ROW_Y = 84;
 const PANEL_ROW_HEIGHT = 48;
+// Strip below the ring listing the eliminated flags with their final place, in elimination order.
+const OUT_TOP = 868;
+const OUT_COLS = 40;
+const OUT_ROWS = 5;
+const OUT_CELL_W = (1200 - 2 * PANEL_X) / OUT_COLS;
+const OUT_CELL_H = 34;
+const OUT_FLAG_SIZE = 20;
 const SPAWN_SPACING = 19; // sunflower spiral scale; the first-round field (all flags) must fit
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const MARBLE_SPEED = 3.5; // px per physics step
@@ -44,6 +51,7 @@ export class ArenaScene extends Phaser.Scene {
   private marbles = new Map<string, Phaser.Physics.Matter.Image>();
   private statusText!: Phaser.GameObjects.Text;
   private finished = false;
+  private outCount = 0;
 
   constructor() {
     super('Arena');
@@ -57,6 +65,7 @@ export class ArenaScene extends Phaser.Scene {
   create(): void {
     this.finished = false;
     this.panelRows = [];
+    this.outCount = 0;
     this.marbles.clear();
     // Top-down arena: no gravity, marbles keep moving and bounce off walls and obstacles.
     this.matter.world.setGravity(0, 0);
@@ -98,7 +107,30 @@ export class ArenaScene extends Phaser.Scene {
       .text(CENTER.x, 16, '', { fontSize: '24px', color: '#ffffff' })
       .setOrigin(0.5, 0);
     this.buildPanel();
+    this.add.text(PANEL_X, OUT_TOP - 4, 'Vyřazení – pořadí', {
+      fontSize: '18px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+    });
     this.updateStatus();
+  }
+
+  /** Appends a flag with its final place to the strip of eliminated flags. */
+  private addToOutList(code: string): void {
+    const place = this.tracker.placeOf(code);
+    if (place === null || this.outCount >= OUT_COLS * OUT_ROWS) return;
+    const col = this.outCount % OUT_COLS;
+    const row = Math.floor(this.outCount / OUT_COLS);
+    this.outCount++;
+    const x = PANEL_X + OUT_CELL_W * (col + 0.5);
+    const y = OUT_TOP + 26 + row * OUT_CELL_H;
+    this.add.image(x, y, `marble-${code}`).setDisplaySize(OUT_FLAG_SIZE, OUT_FLAG_SIZE);
+    this.add
+      .text(x, y + OUT_FLAG_SIZE / 2 + 1, String(place), {
+        fontSize: '11px',
+        color: place === 1 ? '#ffd166' : '#aab0c8',
+      })
+      .setOrigin(0.5, 0);
   }
 
   /**
@@ -259,6 +291,7 @@ export class ArenaScene extends Phaser.Scene {
     for (const [code, img] of this.marbles) {
       if (Phaser.Math.Distance.Between(img.x, img.y, CENTER.x, CENTER.y) > escapeDistance) {
         this.tracker.eliminate(code);
+        this.addToOutList(code);
         img.destroy();
         this.marbles.delete(code);
         // If several marbles leave in the same frame, stop at the first moment one is left.
@@ -283,6 +316,7 @@ export class ArenaScene extends Phaser.Scene {
     const label = this.roundLabel();
     const rowIndex = this.tournament.isFinale ? this.tournament.rounds : this.tournament.round - 1;
     this.tournament.recordWinner(code);
+    this.addToOutList(code);
     this.setPanelRow(
       rowIndex,
       rowIndex < this.tournament.rounds ? `${rowIndex + 1}. kolo` : 'Finále',

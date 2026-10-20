@@ -11,6 +11,18 @@ describe('EliminationTracker', () => {
     expect(t.eliminationOrder).toEqual(['sk', 'de']);
   });
 
+  it('ranks the first marble out last and the winner first', () => {
+    const t = new EliminationTracker(['cz', 'sk', 'de', 'pl']);
+    t.eliminate('sk');
+    t.eliminate('pl');
+    expect(t.placeOf('sk')).toBe(4);
+    expect(t.placeOf('pl')).toBe(3);
+    expect(t.placeOf('cz')).toBeNull(); // still in play
+    t.eliminate('de');
+    expect(t.placeOf('de')).toBe(2);
+    expect(t.placeOf('cz')).toBe(1);
+  });
+
   it('ignores double elimination', () => {
     const t = new EliminationTracker(['cz', 'sk']);
     t.eliminate('sk');

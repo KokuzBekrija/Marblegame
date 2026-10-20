@@ -6,7 +6,7 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#1b1d2a',
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1200, height: 900 },
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1200, height: 1070 },
   physics: { default: 'matter', matter: { gravity: { x: 0, y: 0.6 }, debug: false } },
   scene: [BootScene, ArenaScene],
 });

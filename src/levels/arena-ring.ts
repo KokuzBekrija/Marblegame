@@ -1,6 +1,7 @@
 import type { Obstacle, RingLevel } from './types';
 
-// Ring sits in the right part of the 1200x900 canvas; the left part shows the round winners.
+// Ring sits in the upper right of the 1200x1070 canvas; the left part shows the round winners
+// and the strip below the ring lists the eliminated flags.
 const CENTER = { x: 760, y: 450 };
 const DIAMOND_RADIUS = 290;
 
