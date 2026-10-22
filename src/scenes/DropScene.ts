@@ -12,7 +12,8 @@ const RIDE_SPEED = 180; // px/s along the tube
 const RIDE_SPACING = 35; // px between marbles in the tube: a marble is 32px wide, so almost touching
 const FEED_MS = (RIDE_SPACING / RIDE_SPEED) * 1000; // one marble enters the tube this often
 const GOLDEN_CONJUGATE = 0.6180339887; // steps the drop position evenly across the arena
-const RETURN_SPEED = 240; // px/s along the channel from a green hole back to the tube
+const RETURN_SPEED = 300; // px/s along the channel from a green hole back to the tube
+const MIN_GAP = 34; // marbles on the return channel keep at least this distance (they are 32px wide)
 const GREEN_AT = 30; // px below the floor peaks where a marble counts as inside a green hole
 const RED_AT = 40; // ... and where it is out in a red hole
 const PIPE_COLOR = 0x20243a;
@@ -109,7 +110,7 @@ export class DropScene extends TournamentScene {
     const dt = delta / 1000;
     this.feed(delta);
     this.advance(this.riding, RIDE_SPEED * dt, (t) => this.release(t.code, t.path.at(-1)!.x));
-    this.advance(this.returning, RETURN_SPEED * dt, (t) => this.enqueue(t.code));
+    this.advanceReturning(RETURN_SPEED * dt);
     for (const { body, view, spinner } of this.spins) {
       const angle = spinner.speed * dt;
       this.rotateBody(body, angle, spinner);
@@ -186,7 +187,7 @@ export class DropScene extends TournamentScene {
     return tube.releaseMinX + u * (tube.releaseMaxX - tube.releaseMinX);
   }
 
-  /** Moves travellers along their paths; `arrive` is called for those that reach the end. */
+  /** Moves the marbles in the tube along their paths; `arrive` is called for those that reach the end. */
   private advance(list: Traveller[], step: number, arrive: (t: Traveller) => void): void {
     for (let i = list.length - 1; i >= 0; i--) {
       const t = list[i]!;
@@ -198,6 +199,56 @@ export class DropScene extends TournamentScene {
         const p = pointAt(t.path, t.s);
         this.marbles.get(t.code)?.setPosition(p.x, p.y);
       }
+    }
+  }
+
+  /**
+   * The return channel is a one-lane conveyor. A marble first drops down the chute of its hole
+   * (vertical part of its path) and then joins the horizontal channel to the tube.
+   *
+   * - In the same lane (one chute, or the channel) the marbles closest to the tube move first and
+   *   each one stops short of the marble in front of it.
+   * - A marble at the foot of a chute enters the channel only when there is room: it waits one
+   *   marble's width above the channel until no marble is about to pass the junction.
+   *
+   * So marbles from the same or from different holes never overlap.
+   */
+  private advanceReturning(step: number): void {
+    const dropLength = (t: Traveller) =>
+      Math.hypot(t.path[1]!.x - t.path[0]!.x, t.path[1]!.y - t.path[0]!.y);
+    const inChannel = (t: Traveller) => t.s >= dropLength(t);
+    // Where the marbles in the channel are right now.
+    const channel = this.returning.filter(inChannel).map((t) => pointAt(t.path, t.s));
+    const placed: { p: Point; channel: boolean }[] = []; // marbles already moved this frame
+    const nearestFirst = [...this.returning].sort((a, b) => a.length - a.s - (b.length - b.s));
+    for (const t of nearestFirst) {
+      const drop = dropLength(t);
+      const next = Math.min(t.s + step, t.length);
+      const p = pointAt(t.path, next);
+      const nextInChannel = next >= drop;
+      const stopLine = drop - MIN_GAP;
+      const mustYield =
+        // Reaching the stop line above the channel: only go on if no marble will pass the junction.
+        (t.s < stopLine &&
+          next >= stopLine &&
+          // Marbles already past the junction are far enough ahead; those still approaching
+          // from the left must be at least two marble widths away.
+          channel.some((q) => q.x > t.path[1]!.x - 2 * MIN_GAP && q.x < t.path[1]!.x + 1)) ||
+        placed.some(
+          (q) => q.channel === nextInChannel && Math.hypot(q.p.x - p.x, q.p.y - p.y) < MIN_GAP,
+        );
+      if (mustYield) {
+        placed.push({ p: pointAt(t.path, t.s), channel: inChannel(t) });
+        continue;
+      }
+      t.s = next;
+      if (next >= t.length) {
+        this.returning.splice(this.returning.indexOf(t), 1);
+        this.enqueue(t.code); // swallowed by the feeder at the end of the channel
+        continue;
+      }
+      placed.push({ p, channel: nextInChannel });
+      this.marbles.get(t.code)?.setPosition(p.x, p.y);
     }
   }
 
@@ -234,12 +285,20 @@ export class DropScene extends TournamentScene {
 
   /** A marble fell through a green hole: it rides the channel back to the start of the tube. */
   private startReturn(code: string, img: Phaser.Physics.Matter.Image): void {
+    // If the chute is occupied, the marble queues up above the marble in front of it.
+    const busy = this.returning.map((t) => pointAt(t.path, t.s));
+    let y = img.y;
+    while (y > floorY - 20 && busy.some((q) => Math.hypot(q.x - img.x, q.y - y) < MIN_GAP)) {
+      y -= 6;
+    }
+    // The channel ends a marble's width before the tube, so that a marble arriving at the end
+    // never overlaps the one that was just fed into the tube.
     const path = [
-      { x: img.x, y: img.y },
+      { x: img.x, y },
       { x: img.x, y: tube.bottomY },
-      { x: tube.x, y: tube.bottomY },
+      { x: tube.x - MIN_GAP, y: tube.bottomY },
     ];
-    img.setVelocity(0, 0).setStatic(true).setCollidesWith(0);
+    img.setVelocity(0, 0).setStatic(true).setCollidesWith(0).setPosition(img.x, y);
     this.away.add(code);
     this.anchors.delete(code);
     this.returning.push({ code, s: 0, path, length: pathLength(path) });
