@@ -19,7 +19,7 @@ const GAMES: GameChoice[] = [
     scene: 'Drop',
     title: 'Marble drop',
     description:
-      'Flags fall from the top through pegs and bars and are out when they drop through the floor.',
+      'Flags ride up a tube and drop into a field of pegs. Red holes eliminate them, green holes send them back to the start.',
   },
 ];
 

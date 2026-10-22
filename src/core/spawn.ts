@@ -1,4 +1,4 @@
-import type { DropLevel, Obstacle, RingLevel } from '../levels/types';
+import type { Obstacle, RingLevel } from '../levels/types';
 
 export const MARBLE_RADIUS = 16;
 export const WALL_THICKNESS = 24;
@@ -94,25 +94,4 @@ export function ringSpawnPoints(count: number, level: RingLevel): Point[] {
     clearance: MARBLE_RADIUS + 2,
     obstacles: level.obstacles,
   });
-}
-
-const DROP_SPACING = 34; // horizontal distance of the staggered start block
-const DROP_ROW_HEIGHT = 30;
-const DROP_MARGIN = 30;
-
-/** Start block at the top of a drop level: staggered rows, filled from the top down. */
-export function dropSpawnPoints(count: number, level: DropLevel): Point[] {
-  const { left, right, top } = level.bounds;
-  const cols = Math.floor((right - left - 2 * DROP_MARGIN - DROP_SPACING / 2) / DROP_SPACING) + 1;
-  const width = (cols - 1) * DROP_SPACING + DROP_SPACING / 2;
-  const x0 = (left + right) / 2 - width / 2;
-  const points: Point[] = [];
-  for (let i = 0; i < count; i++) {
-    const row = Math.floor(i / cols);
-    points.push({
-      x: x0 + (i % cols) * DROP_SPACING + (row % 2) * (DROP_SPACING / 2),
-      y: top + DROP_MARGIN + row * DROP_ROW_HEIGHT,
-    });
-  }
-  return points;
 }

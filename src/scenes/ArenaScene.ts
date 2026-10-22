@@ -51,14 +51,8 @@ export class ArenaScene extends TournamentScene {
 
   protected stepWorld(delta: number): void {
     // Rotate the compound ring around its geometric center.
-    // Phaser's typings omit the optional `point` argument of Matter's Body.rotate.
-    const rotate = this.matter.body.rotate as unknown as (
-      body: MatterJS.BodyType,
-      rotation: number,
-      point: { x: number; y: number },
-    ) => void;
     const step = this.level.rotationSpeed * (delta / 1000);
-    rotate(this.ring, step, CENTER);
+    this.rotateBody(this.ring, step, CENTER);
     this.ringGfx.rotation += step;
 
     const escapeDistance = this.level.radius + WALL_THICKNESS + MARBLE_RADIUS;
