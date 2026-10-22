@@ -62,15 +62,22 @@ const holes: DropHole[] = HOLE_KINDS.map((kind, k) => ({
   kind,
 }));
 
-/** Windmills that fling marbles around; they turn in alternating directions. */
+/**
+ * Large windmills in three staggered rows that together cover most of the arena width: the
+ * gaps between them are only about 1.5 marbles wide, so many marbles are caught and flung.
+ * Neighbours turn in opposite directions, like meshing gears, so nothing is sheared between them.
+ */
 const spinners: Spinner[] = [
-  { x: 565, y: 340, w: 130, h: 14, arms: 2, speed: 1.4 },
-  { x: 915, y: 340, w: 130, h: 14, arms: 2, speed: -1.4 },
-  { x: 740, y: 520, w: 150, h: 14, arms: 3, speed: 1.8 },
-  { x: 565, y: 700, w: 130, h: 14, arms: 2, speed: -1.4 },
-  { x: 915, y: 700, w: 130, h: 14, arms: 2, speed: 1.4 },
+  { x: 520, y: 300, w: 170, h: 16, arms: 2, speed: 1.3 },
+  { x: 740, y: 300, w: 170, h: 16, arms: 2, speed: -1.3 },
+  { x: 960, y: 300, w: 170, h: 16, arms: 2, speed: 1.3 },
+  { x: 630, y: 520, w: 170, h: 16, arms: 3, speed: -1.6 },
+  { x: 850, y: 520, w: 170, h: 16, arms: 3, speed: 1.6 },
+  { x: 520, y: 740, w: 170, h: 16, arms: 2, speed: -1.3 },
+  { x: 740, y: 740, w: 170, h: 16, arms: 2, speed: 1.3 },
+  { x: 960, y: 740, w: 170, h: 16, arms: 2, speed: -1.3 },
 ];
-const SPINNER_CLEARANCE = 30; // pegs closer than this to the tip of a spinner are left out
+const SPINNER_CLEARANCE = 34; // pegs closer than this to the tip of a spinner are left out
 
 /**
  * Staggered rows: even rows hold round pegs, odd rows alternate between tilted bars and
