@@ -1,8 +1,9 @@
 import type { Obstacle, RingLevel } from './types';
 
-// Ring sits in the upper right of the 1200x1070 canvas; the left part shows the round winners
-// and the strip below the ring lists the eliminated flags.
-const CENTER = { x: 760, y: 450 };
+// The ring is as large as the screen allows: it fills the height of the 1400x1070 canvas
+// (the status line fits above it) and sits right of the left column with the round winners
+// and the eliminated flags.
+const CENTER = { x: 885, y: 555 };
 
 /** `count` obstacles evenly spaced on a circle around the ring center. */
 function circleOf(
@@ -26,24 +27,22 @@ export const arenaRing: RingLevel = {
   id: 'arena-ring',
   name: 'Rotating ring',
   center: CENTER,
-  radius: 380,
-  rotationSpeed: 0.4,
-  holes: [
-    { angle: 0, width: 0.2 },
-    { angle: 2.1, width: 0.2 },
-    { angle: 4.2, width: 0.2 },
-  ],
+  radius: 495,
+  rotationSpeed: 0.6,
+  // A big ring needs more exits than a small one, or a round takes forever: five holes of
+  // about 100px (three marble widths) evenly around the ring.
+  holes: Array.from({ length: 5 }, (_, k) => ({ angle: (k / 5) * Math.PI * 2, width: 0.2 })),
   obstacles: [
     // Inner pinwheel: bars tilted against the radius so marbles get swirled outwards.
-    ...circleOf(6, 100, 0, (a) => ({ w: 60, h: 12, angle: a + Math.PI / 2 + 0.6 })),
-    // Middle: rhombi with the long diagonal pointing outwards.
-    ...circleOf(12, 200, Math.PI / 12, (a) => ({
+    ...circleOf(6, 120, 0, (a) => ({ w: 76, h: 14, angle: a + Math.PI / 2 + 0.6 })),
+    // Rhombi with the long diagonal pointing outwards.
+    ...circleOf(14, 240, Math.PI / 14, (a) => ({
       shape: 'diamond',
-      w: 28,
-      h: 48,
+      w: 32,
+      h: 56,
       angle: a - Math.PI / 2,
     })),
     // Outer: short bars along the ring that deflect marbles creeping around the wall.
-    ...circleOf(10, 290, Math.PI / 10, (a) => ({ w: 56, h: 10, angle: a + Math.PI / 2 })),
+    ...circleOf(12, 355, Math.PI / 12, (a) => ({ w: 70, h: 12, angle: a + Math.PI / 2 })),
   ],
 };

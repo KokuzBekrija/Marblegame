@@ -3,7 +3,7 @@ import { MARBLE_RADIUS, WALL_THICKNESS, ringSpawnPoints } from '../core/spawn';
 import { arenaRing } from '../levels/arena-ring';
 import { TournamentScene } from './TournamentScene';
 
-const MARBLE_SPEED = 3.5; // px per physics step
+const MARBLE_SPEED = 5; // px per physics step
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
 const CENTER = arenaRing.center;
@@ -28,13 +28,20 @@ export class ArenaScene extends TournamentScene {
   protected readonly marbleFrictionAir = 0;
   private ring!: MatterJS.BodyType;
   private ringGfx!: Phaser.GameObjects.Graphics;
+  private fallingOut = new Set<string>(); // marbles on their way out through a hole
 
   constructor() {
     super('Arena');
   }
 
+  /** Wide enough for the big ring next to the left column (ring center 885 + radius 507 + margin). */
+  protected get canvasWidth(): number {
+    return 1400;
+  }
+
   protected buildWorld(): void {
     this.matter.world.setGravity(0, 0);
+    this.fallingOut.clear();
     this.ring = this.buildRing();
     this.ringGfx = this.drawRing();
     this.buildObstacles();
@@ -63,11 +70,37 @@ export class ArenaScene extends TournamentScene {
         if (this.tracker.winner) break;
         continue;
       }
+      if (!this.fallingOut.has(code) && this.isOverHole(img)) this.dropThroughHole(code, img);
       // Without gravity or friction, keep every marble at constant speed.
       const v = img.body!.velocity;
       const speed = Math.hypot(v.x, v.y);
       if (speed > 0.01) img.setVelocity((v.x / speed) * MARBLE_SPEED, (v.y / speed) * MARBLE_SPEED);
     }
+  }
+
+  /**
+   * A marble that reaches the wall right at a hole goes out through it. Without this, a marble
+   * sliding along the wall at a shallow angle would cross every hole without ever leaving (it
+   * cannot get far enough out in the width of the hole) and circle there for minutes.
+   */
+  private isOverHole(img: Phaser.Physics.Matter.Image): boolean {
+    const { radius, holes } = this.level;
+    const dx = img.x - CENTER.x;
+    const dy = img.y - CENTER.y;
+    if (Math.hypot(dx, dy) < radius - WALL_THICKNESS / 2 - MARBLE_RADIUS - 10) return false;
+    const angle = Math.atan2(dy, dx);
+    return holes.some(
+      (h) => angleDiff(angle, h.angle + this.ringGfx.rotation) <= h.width / 2 - 0.045,
+    );
+  }
+
+  /** The marble no longer collides with anything and leaves radially. */
+  private dropThroughHole(code: string, img: Phaser.Physics.Matter.Image): void {
+    this.fallingOut.add(code);
+    const dx = img.x - CENTER.x;
+    const dy = img.y - CENTER.y;
+    const r = Math.hypot(dx, dy) || 1;
+    img.setCollidesWith(0).setVelocity((dx / r) * MARBLE_SPEED, (dy / r) * MARBLE_SPEED);
   }
 
   /** Builds the ring from short rectangles, leaving gaps where the level defines holes. */

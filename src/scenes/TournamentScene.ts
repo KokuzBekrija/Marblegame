@@ -7,6 +7,8 @@ import { Tournament } from '../core/tournament';
 import type { LevelConfig } from '../levels/types';
 
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
+export const DEFAULT_CANVAS_WIDTH = 1200;
+export const CANVAS_HEIGHT = 1070;
 const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
 const PANEL_X = 24;
 const PANEL_ROW_Y = 84;
@@ -49,6 +51,10 @@ export abstract class TournamentScene extends Phaser.Scene {
   private finalSlots: Phaser.GameObjects.Text[] = [];
 
   protected abstract readonly level: LevelConfig;
+  /** Width of the game canvas in this mode; a mode may need more room for its arena. */
+  protected get canvasWidth(): number {
+    return DEFAULT_CANVAS_WIDTH;
+  }
   /** Where the status line is centered and where the round winner glides to. */
   protected abstract readonly arenaCenter: Point;
   /** Fraction of the normal velocity kept after bouncing off a wall (1 = perfectly elastic). */
@@ -96,6 +102,7 @@ export abstract class TournamentScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.scale.setGameSize(this.canvasWidth, CANVAS_HEIGHT);
     this.finished = false;
     this.panelRows = [];
     this.outCount = 0;
@@ -128,7 +135,8 @@ export abstract class TournamentScene extends Phaser.Scene {
 
     this.statusText = this.add
       .text(this.arenaCenter.x, 16, '', { fontSize: '24px', color: '#ffffff' })
-      .setOrigin(0.5, 0);
+      .setOrigin(0.5, 0)
+      .setDepth(10); // stays readable when a marble leaves the arena right under it
     this.buildPanel(ids.length);
     this.buildMenuLink();
     this.updateStatus();

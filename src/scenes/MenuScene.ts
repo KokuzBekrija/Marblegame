@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
-
-const WIDTH = 1200;
+import { CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH as WIDTH } from './TournamentScene';
 
 interface GameChoice {
   scene: string;
@@ -30,6 +29,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.scale.setGameSize(WIDTH, CANVAS_HEIGHT); // the ring game uses a wider canvas
     this.add
       .text(WIDTH / 2, 150, 'Flag Marbles', {
         fontSize: '72px',
