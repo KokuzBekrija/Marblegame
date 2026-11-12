@@ -1,4 +1,5 @@
-﻿import type { DropHole, DropLevel, Obstacle, Spinner } from './types';
+﻿import { scatter } from './scatter';
+import type { DropHole, DropLevel, Obstacle, Spinner } from './types';
 
 // Playfield right of the winners panel, above the strip listing the eliminated flags.
 // The tube runs up the right edge; its return channel passes below the floor of the arena.
@@ -31,12 +32,6 @@ const GALTON_EDGE = 30; // distance of the outermost pegs from the walls
 const GALTON_PITCH = (RIGHT - LEFT - 2 * GALTON_EDGE) / GALTON_COLS; // 71px: gaps of 55px, 1.7 marbles
 const GALTON_PEG = 16;
 const GALTON_SCATTER = 10; // px; gaps stay at 55 - 2 * 10 = 35px, still wider than a marble
-
-/** Fixed pseudo-random number in [-1, 1) from two integers: the same layout on every start. */
-function scatter(a: number, b: number): number {
-  const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
-  return (v - Math.floor(v)) * 2 - 1;
-}
 
 const HOLE_KINDS: DropHole['kind'][] = ['red', 'green', 'red', 'red', 'green', 'red'];
 const HOLES = HOLE_KINDS.length;

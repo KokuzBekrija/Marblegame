@@ -6,9 +6,12 @@ import { EliminationTracker } from '../core/elimination';
 import { MARBLE_RADIUS } from '../core/spawn';
 import type { Point } from '../core/spawn';
 import { Tournament } from '../core/tournament';
-import type { LevelConfig } from '../levels/types';
+import type { TournamentLike } from '../core/tournament';
+import type { LevelConfig, Spinner } from '../levels/types';
 
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
+const STUCK_DISTANCE = 24; // a marble that stays within this many px ...
+const STUCK_AFTER = 2500; // ... for this many ms is considered stuck (also when it rocks to and fro)
 export const DEFAULT_CANVAS_WIDTH = 1200;
 export const CANVAS_HEIGHT = 1070;
 const NEXT_ROUND_DELAY = 4500; // ms the winner stays on screen
@@ -33,12 +36,24 @@ const PANEL_TEXT_WIDTH = 300; // longer names wrap instead of running into the a
 // The finale (5 flags) lists the full ranking with names, larger than the strip of normal rounds.
 const FINAL_ROW_HEIGHT = 52;
 const FINAL_FLAG_SIZE = 30;
+const DETAILED_RANKING_MAX = 8; // a finale with more flags lists them in the strip of small flags
+// A round with several qualifiers: name of the round, then a row of their flags.
+const MULTI_LABEL_WIDTH = 150;
+const MULTI_FLAGS_X = 205;
+const MULTI_FLAG_STEP = 42;
 
 export function countryName(code: string): string {
   return COUNTRIES.find((c) => c.code === code)?.name ?? code;
 }
 
 type Vec = { x: number; y: number };
+
+interface Spin {
+  body: MatterJS.BodyType;
+  view: Phaser.GameObjects.Container;
+  spinner: Spinner; // working copy: its speed changes when the spinner reverses
+  base: Spinner; // as defined by the level
+}
 
 /**
  * Shared tournament flow: 5 rounds, each won by the last marble in play, then a finale of the
@@ -49,17 +64,21 @@ type Vec = { x: number; y: number };
  * along walls).
  */
 export abstract class TournamentScene extends Phaser.Scene {
-  protected tournament!: Tournament;
+  protected tournament!: TournamentLike;
   protected tracker!: EliminationTracker;
   protected marbles = new Map<string, Phaser.Physics.Matter.Image>();
   protected finished = false;
   protected sfx!: Sfx;
   protected fx!: Effects;
-  private panelRows: { icon: Phaser.GameObjects.Image | null; text: Phaser.GameObjects.Text }[] =
-    [];
+  private panelRows: { icons: Phaser.GameObjects.Image[]; text: Phaser.GameObjects.Text }[] = [];
   private statusText!: Phaser.GameObjects.Text;
+  private spins: Spin[] = [];
+  private spinMs = 0;
+  /** Where each marble was a while ago; see nudgeIfStuck. */
+  protected anchors = new Map<string, { x: number; y: number; ms: number }>();
   private outCount = 0;
   private finalSlots: Phaser.GameObjects.Text[] = [];
+  private detailedRanking = false;
 
   protected abstract readonly level: LevelConfig;
   /** Width of the game canvas in this mode; a mode may need more room for its arena. */
@@ -86,10 +105,66 @@ export abstract class TournamentScene extends Phaser.Scene {
   protected abstract stepWorld(delta: number): void;
   /** Called once all marbles exist, before the first frame; lets a mode park or move them. */
   protected afterSpawn(): void {}
-  /** Velocity (px/step) of a moving wall at point `p`; walls are static unless a mode says so. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  protected wallVelocityAt(_wall: MatterJS.BodyType, _p: Vec): Vec {
-    return { x: 0, y: 0 };
+  /** Speed of a spinner's surface at `p`, in px per physics step (assuming 60 steps per second). */
+  protected wallVelocityAt(wall: MatterJS.BodyType, p: Vec): Vec {
+    const root = (wall.parent ?? wall) as unknown as { plugin?: { spin?: Spinner } };
+    const spin = root.plugin?.spin;
+    if (!spin) return { x: 0, y: 0 };
+    const omega = spin.speed / 60;
+    return { x: -omega * (p.y - spin.y), y: omega * (p.x - spin.x) };
+  }
+
+  /** Windmills: static compound bodies turned by hand each frame, drawn as a rotating container. */
+  protected buildSpinners(spinners: Spinner[]): void {
+    this.spinMs = 0;
+    this.spins = spinners.map((base) => {
+      const spinner = { ...base }; // its `speed` is updated while the spinner reverses
+      const { x, y, w, h, arms } = spinner;
+      const angles = Array.from({ length: arms }, (_, k) => (k * Math.PI) / arms);
+      const parts = angles.map((angle) => this.matter.bodies.rectangle(x, y, w, h, { angle }));
+      const body = this.matter.body.create({ parts, isStatic: true });
+      (body as unknown as { plugin: { spin?: Spinner } }).plugin.spin = spinner;
+      this.matter.world.add(body);
+      const view = this.add.container(x, y, [
+        ...angles.map((angle) => this.add.rectangle(0, 0, w, h, 0xff8a5c).setRotation(angle)),
+        this.add.circle(0, 0, h * 0.9, 0xffd2bd),
+      ]);
+      return { body, view, spinner, base };
+    });
+  }
+
+  /** Turns every spinner by one frame's worth. */
+  protected stepSpinners(delta: number): void {
+    const dt = delta / 1000;
+    this.spinMs += delta;
+    for (const { body, view, spinner, base } of this.spins) {
+      if (base.reverseEvery) {
+        // Turns one way, slows down, then the other way, so that it throws marbles to the left
+        // as often as to the right. It never stops completely: marbles would rest on it.
+        const c = Math.cos((Math.PI * this.spinMs) / 1000 / base.reverseEvery);
+        spinner.speed = base.speed * Math.sign(c) * (0.35 + 0.65 * Math.abs(c));
+      }
+      const angle = spinner.speed * dt;
+      this.rotateBody(body, angle, spinner);
+      view.rotation += angle;
+    }
+  }
+
+  /**
+   * A marble balanced on a peak or wedged in a pile would never fall (it may jitter in place,
+   * so speed alone does not tell): when it has hardly moved for a while, give it a kick.
+   */
+  protected nudgeIfStuck(code: string, img: Phaser.Physics.Matter.Image, delta: number): void {
+    const anchor = this.anchors.get(code);
+    if (!anchor || Math.hypot(img.x - anchor.x, img.y - anchor.y) > STUCK_DISTANCE) {
+      this.anchors.set(code, { x: img.x, y: img.y, ms: 0 });
+      return;
+    }
+    anchor.ms += delta;
+    if (anchor.ms > STUCK_AFTER) {
+      img.setVelocity(Phaser.Math.FloatBetween(-3, 3), -3);
+      anchor.ms = 0;
+    }
   }
 
   /** Turns a static body about `pivot`; Phaser's typings omit the pivot argument of Body.rotate. */
@@ -110,8 +185,13 @@ export abstract class TournamentScene extends Phaser.Scene {
     super(key);
   }
 
-  init(data: { tournament?: Tournament }): void {
-    this.tournament = data.tournament ?? new Tournament(COUNTRIES.map((c) => c.code));
+  init(data: { tournament?: TournamentLike }): void {
+    this.tournament = data.tournament ?? this.newTournament();
+  }
+
+  /** The tournament a mode starts with: 5 rounds with all flags, then a finale. */
+  protected newTournament(): TournamentLike {
+    return new Tournament(COUNTRIES.map((c) => c.code));
   }
 
   create(): void {
@@ -127,7 +207,7 @@ export abstract class TournamentScene extends Phaser.Scene {
     this.buildWorld();
 
     const ids = Phaser.Utils.Array.Shuffle(this.tournament.participants);
-    this.tracker = new EliminationTracker(ids);
+    this.tracker = new EliminationTracker(ids, this.tournament.advancing);
 
     const spawn = this.spawnPoints(ids.length);
     ids.forEach((code, i) => {
@@ -151,6 +231,7 @@ export abstract class TournamentScene extends Phaser.Scene {
     this.statusText = this.add
       .text(this.arenaCenter.x, 16, '', { fontSize: '24px', color: '#ffffff' })
       .setOrigin(0.5, 0)
+      .setScrollFactor(0) // the user interface stays on the screen when the camera scrolls
       .setDepth(10); // stays readable when a marble leaves the arena right under it
     this.buildPanel(ids.length);
     this.buildMenuLink();
@@ -161,15 +242,14 @@ export abstract class TournamentScene extends Phaser.Scene {
     if (this.finished) return;
     this.stepWorld(delta);
     this.updateStatus();
-    const winnerCode = this.tracker.winner;
-    if (winnerCode) this.showWinner(winnerCode);
+    if (this.tracker.decided) this.showResult();
   }
 
   /** Removes a marble from play, with a puff of sparks in `color`, and lists its final place. */
-  protected eliminate(code: string, color = 0xffffff): void {
+  protected eliminate(code: string, color = 0xffffff, quiet = false): void {
     const img = this.marbles.get(code);
-    if (img) this.fx.burst(img.x, img.y, color);
-    this.sfx.eliminated();
+    if (img && !quiet) this.fx.burst(img.x, img.y, color);
+    if (!quiet) this.sfx.eliminated();
     this.tracker.eliminate(code);
     this.addToOutList(code);
     this.marbles.get(code)?.destroy();
@@ -344,15 +424,14 @@ export abstract class TournamentScene extends Phaser.Scene {
     this.sfx.hit(approach * 0.7); // marbles click softer than walls
   }
 
-  private roundLabel(): string {
-    return this.tournament.isFinale
-      ? 'Final'
-      : `Round ${this.tournament.round}/${this.tournament.rounds}`;
+  /** What the status line shows after the round; modes may replace it. */
+  protected statusDetail(): string {
+    return `Remaining: ${this.tracker.remaining.length}`;
   }
 
   private updateStatus(): void {
     if (this.finished) return;
-    this.statusText.setText(`${this.roundLabel()} · Remaining: ${this.tracker.remaining.length}`);
+    this.statusText.setText(`${this.tournament.label} · ${this.statusDetail()}`);
   }
 
   private buildMenuLink(): void {
@@ -364,6 +443,7 @@ export abstract class TournamentScene extends Phaser.Scene {
         backgroundColor: '#323859',
         padding: { x: 10, y: 5 },
       })
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', leave);
     this.input.keyboard?.once('keydown-ESC', leave);
@@ -375,6 +455,7 @@ export abstract class TournamentScene extends Phaser.Scene {
         backgroundColor: '#323859',
         padding: { x: 10, y: 5 },
       })
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
     const toggle = () => {
       toggleMute(this);
@@ -386,61 +467,95 @@ export abstract class TournamentScene extends Phaser.Scene {
 
   /** Left-hand list: one row per qualifying round plus the finale, filled in as winners are known. */
   private buildPanel(fieldSize: number): void {
-    const { rounds, winners, champion } = this.tournament;
-    this.add.text(PANEL_X, 42, 'Round winners', {
-      fontSize: '28px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-    });
+    const { rounds } = this.tournament;
+    this.add
+      .text(PANEL_X, 42, this.tournament.title, {
+        fontSize: '28px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+      })
+      .setScrollFactor(0);
 
     for (let i = 0; i <= rounds; i++) {
       const y = PANEL_ROW_Y + i * PANEL_ROW_HEIGHT;
-      const label = i < rounds ? `Round ${i + 1}` : 'Final';
-      const text = this.add.text(PANEL_X + 44, y, '', {
-        fontSize: '20px',
-        color: '#ffffff',
-        wordWrap: { width: PANEL_TEXT_WIDTH - 44 },
-      });
-      this.panelRows.push({ icon: null, text });
-      const winner = i < rounds ? winners[i] : champion;
-      this.setPanelRow(i, label, winner ?? null);
+      const text = this.add
+        .text(PANEL_X + 44, y, '', {
+          fontSize: '20px',
+          color: '#ffffff',
+          wordWrap: { width: PANEL_TEXT_WIDTH - 44 },
+        })
+        .setScrollFactor(0);
+      this.panelRows.push({ icons: [], text });
+      this.setPanelRow(i, this.tournament.labelOf(i), this.tournament.qualifiersOf(i));
     }
 
+    // With a handful of finalists the finale lists them all with their names.
+    this.detailedRanking = this.tournament.isFinale && fieldSize <= DETAILED_RANKING_MAX;
     const finale = this.tournament.isFinale;
-    this.add.text(PANEL_X, OUT_TOP - 4, finale ? 'Final ranking' : 'Eliminated – final place', {
-      fontSize: '18px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-    });
-    if (finale) {
+    const heading = finale
+      ? 'Final ranking'
+      : this.tournament.advancing > 1
+        ? 'Round ranking'
+        : 'Eliminated – final place';
+    this.add
+      .text(PANEL_X, OUT_TOP - 4, heading, {
+        fontSize: '18px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+      })
+      .setScrollFactor(0);
+    if (this.detailedRanking) {
       this.finalSlots = [];
       for (let place = 1; place <= fieldSize; place++) {
         this.finalSlots.push(
-          this.add.text(PANEL_X + FINAL_FLAG_SIZE + 12, this.finalRowY(place) - 14, `${place}. ?`, {
-            fontSize: '22px',
-            color: '#6b6f85',
-            wordWrap: { width: PANEL_TEXT_WIDTH - FINAL_FLAG_SIZE - 12 },
-          }),
+          this.add
+            .text(PANEL_X + FINAL_FLAG_SIZE + 12, this.finalRowY(place) - 14, `${place}. ?`, {
+              fontSize: '22px',
+              color: '#6b6f85',
+              wordWrap: { width: PANEL_TEXT_WIDTH - FINAL_FLAG_SIZE - 12 },
+            })
+            .setScrollFactor(0),
         );
       }
     }
   }
 
-  private setPanelRow(index: number, label: string, code: string | null): void {
+  /**
+   * One row of the list: the round's name and its qualifiers. A single winner is shown with its
+   * name; several qualifiers are shown as a row of flags next to the name of the round.
+   */
+  private setPanelRow(index: number, label: string, codes: readonly string[]): void {
     const row = this.panelRows[index]!;
     const y = PANEL_ROW_Y + index * PANEL_ROW_HEIGHT;
-    row.icon?.destroy();
-    row.icon = null;
-    if (code) {
-      row.icon = this.add.image(PANEL_X + 16, y + 14, `marble-${code}`).setDisplaySize(32, 32);
+    for (const icon of row.icons) icon.destroy();
+    row.icons = [];
+    const flag = (code: string, x: number, size: number) =>
+      this.add
+        .image(x, y + 14, `marble-${code}`)
+        .setDisplaySize(size, size)
+        .setScrollFactor(0);
+    if (codes.length > 1) {
+      row.text.setX(PANEL_X).setText(label).setColor('#ffffff').setFontSize(16);
+      row.text.setWordWrapWidth(MULTI_LABEL_WIDTH);
+      row.icons = codes.map((code, k) => flag(code, MULTI_FLAGS_X + k * MULTI_FLAG_STEP, 32));
+    } else if (codes.length === 1) {
+      const code = codes[0]!;
+      row.icons = [flag(code, PANEL_X + 16, 32)];
       const text = `${label} – ${countryName(code)}`;
       // A long name takes two lines; a smaller font keeps them inside the row.
       row.text
+        .setX(PANEL_X + 44)
+        .setWordWrapWidth(PANEL_TEXT_WIDTH - 44)
         .setText(text)
         .setColor('#ffffff')
         .setFontSize(text.length > 28 ? 16 : 20);
     } else {
-      row.text.setText(`${label} – ?`).setColor('#6b6f85').setFontSize(20);
+      row.text
+        .setX(PANEL_X + 44)
+        .setWordWrapWidth(PANEL_TEXT_WIDTH - 44)
+        .setText(`${label} – ?`)
+        .setColor('#6b6f85')
+        .setFontSize(20);
     }
   }
 
@@ -454,7 +569,8 @@ export abstract class TournamentScene extends Phaser.Scene {
     if (!slot) return;
     this.add
       .image(PANEL_X + FINAL_FLAG_SIZE / 2, this.finalRowY(place), `marble-${code}`)
-      .setDisplaySize(FINAL_FLAG_SIZE, FINAL_FLAG_SIZE);
+      .setDisplaySize(FINAL_FLAG_SIZE, FINAL_FLAG_SIZE)
+      .setScrollFactor(0);
     slot
       .setText(`${place}. ${countryName(code)}`)
       .setColor(place === 1 ? '#ffd166' : '#ffffff')
@@ -465,7 +581,7 @@ export abstract class TournamentScene extends Phaser.Scene {
   private addToOutList(code: string): void {
     const place = this.tracker.placeOf(code);
     if (place === null) return;
-    if (this.tournament.isFinale) {
+    if (this.detailedRanking) {
       this.fillFinalSlot(code, place);
       return;
     }
@@ -475,13 +591,17 @@ export abstract class TournamentScene extends Phaser.Scene {
     this.outCount++;
     const x = PANEL_X + OUT_CELL_W * (col + 0.5) + 4;
     const y = OUT_TOP + 26 + row * OUT_CELL_H;
-    this.add.image(x, y, `marble-${code}`).setDisplaySize(OUT_FLAG_SIZE, OUT_FLAG_SIZE);
+    this.add
+      .image(x, y, `marble-${code}`)
+      .setDisplaySize(OUT_FLAG_SIZE, OUT_FLAG_SIZE)
+      .setScrollFactor(0);
     this.add
       .text(x, y + OUT_FLAG_SIZE / 2 + 1, String(place), {
         fontSize: '11px',
         color: place === 1 ? '#ffd166' : '#aab0c8',
       })
-      .setOrigin(0.5, 0);
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0);
   }
 
   /**
@@ -489,7 +609,9 @@ export abstract class TournamentScene extends Phaser.Scene {
    * the name of the country in big letters below it. They pop in once the flag has arrived.
    */
   private showWinnerBanner(code: string, caption: string, champion: boolean): void {
-    const { x, y } = this.arenaCenter;
+    // The banner belongs to the screen; the winner glides to arenaCenter in the world.
+    const x = this.arenaCenter.x;
+    const y = this.arenaCenter.y - this.cameras.main.scrollY;
     const reach = MARBLE_RADIUS * WINNER_SCALE; // radius of the enlarged flag
     const outline = { stroke: '#1b1d2a', strokeThickness: 8 };
     const ring = this.add.circle(x, y, reach + 5).setStrokeStyle(6, 0xffd166);
@@ -512,7 +634,7 @@ export abstract class TournamentScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
     for (const target of [ring, top, name]) {
-      target.setDepth(15).setAlpha(0).setScale(0.6);
+      target.setScrollFactor(0).setDepth(15).setAlpha(0).setScale(0.6);
       this.tweens.add({
         targets: target,
         alpha: 1,
@@ -524,19 +646,24 @@ export abstract class TournamentScene extends Phaser.Scene {
     }
   }
 
-  /** The last marble stays in the arena: it is frozen and glides to the center. */
-  private showWinner(code: string): void {
+  /**
+   * The round is decided. The best marble stays in the arena, frozen, and glides to the center;
+   * the others that advance are frozen where they are.
+   */
+  private showResult(): void {
     this.finished = true;
+    const ranked = this.tracker.standings;
+    const code = ranked[0]!;
     const img = this.marbles.get(code);
-    const label = this.roundLabel();
+    const label = this.tournament.label;
     const rowIndex = this.tournament.isFinale ? this.tournament.rounds : this.tournament.round - 1;
-    this.tournament.recordWinner(code);
-    this.addToOutList(code);
-    this.setPanelRow(
-      rowIndex,
-      rowIndex < this.tournament.rounds ? `Round ${rowIndex + 1}` : 'Final',
-      code,
-    );
+    const rowLabel = this.tournament.labelOf(rowIndex);
+    this.tournament.recordResult(ranked);
+    for (const id of ranked) {
+      this.addToOutList(id);
+      if (id !== code) this.marbles.get(id)?.setStatic(true);
+    }
+    this.setPanelRow(rowIndex, rowLabel, ranked);
 
     if (this.tournament.isComplete) {
       // The name is in the banner; a long name here would run off the screen.
@@ -562,7 +689,11 @@ export abstract class TournamentScene extends Phaser.Scene {
         ease: 'Sine.easeInOut',
       });
     }
-    this.showWinnerBanner(code, champion ? 'CHAMPION' : `ROUND ${rowIndex + 1} WINNER`, champion);
+    this.showWinnerBanner(
+      code,
+      champion ? 'CHAMPION' : `${rowLabel.toUpperCase()} WINNER`,
+      champion,
+    );
 
     if (this.tournament.isComplete) {
       this.input.once('pointerdown', () => this.scene.start('Menu'));

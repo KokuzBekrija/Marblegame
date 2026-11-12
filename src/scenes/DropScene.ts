@@ -2,12 +2,9 @@ import Phaser from 'phaser';
 import { nearestHole, pathLength, pointAt } from '../core/path';
 import type { Point } from '../core/spawn';
 import { dropField } from '../levels/drop-field';
-import type { Spinner } from '../levels/types';
 import { TournamentScene } from './TournamentScene';
 
 const MAX_SPEED = 12; // px per physics step; keeps fast marbles from tunnelling through pegs
-const STUCK_DISTANCE = 24; // a marble that stays within this many px ...
-const STUCK_AFTER = 2500; // ... for this many ms is considered stuck (also when it rocks to and fro)
 const RIDE_SPEED = 180; // px/s along the tube
 const RIDE_SPACING = 35; // px between marbles in the tube: a marble is 32px wide, so almost touching
 const FEED_MS = (RIDE_SPACING / RIDE_SPEED) * 1000; // one marble enters the tube this often
@@ -23,13 +20,6 @@ const GREEN_HOLE_COLOR = 0x2ecc71;
 const ALL_CATEGORIES = 0xffffffff;
 
 const { tube, floorY, holes } = dropField;
-
-interface Spin {
-  body: MatterJS.BodyType;
-  view: Phaser.GameObjects.Container;
-  spinner: Spinner; // working copy: its speed changes when the spinner reverses
-  base: Spinner; // as defined by the level
-}
 
 interface Traveller {
   code: string;
@@ -59,7 +49,6 @@ export class DropScene extends TournamentScene {
   // Without it, marbles dropped at similar places follow the same lanes and nearly all of them
   // leave through one or two holes.
   protected readonly bounceScatter = 0.3;
-  private anchors = new Map<string, { x: number; y: number; ms: number }>();
   private waiting: string[] = []; // hidden at the tube entrance, in the order they will ride up
   private riding: Traveller[] = [];
   private returning: Traveller[] = [];
@@ -67,8 +56,6 @@ export class DropScene extends TournamentScene {
   private feedMs = 0;
   private dropPhase = 0; // random start of the sequence of drop positions
   private dropCount = 0;
-  private spins: Spin[] = [];
-  private spinMs = 0;
   private waitingText!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -87,7 +74,7 @@ export class DropScene extends TournamentScene {
     this.matter.world.setGravity(0, this.level.gravity);
     this.drawPipes();
     this.buildObstacles();
-    this.buildSpinners();
+    this.buildSpinners(this.level.spinners);
     this.waitingText = this.add
       .text(1176, 16, '', { fontSize: '20px', color: '#9aa0c0' })
       .setOrigin(1, 0);
@@ -119,54 +106,9 @@ export class DropScene extends TournamentScene {
     this.feed(delta);
     this.advance(this.riding, RIDE_SPEED * dt, (t) => this.release(t.code, t.path.at(-1)!.x));
     this.advanceReturning(RETURN_SPEED * dt);
-    this.spinMs += delta;
-    for (const { body, view, spinner, base } of this.spins) {
-      if (base.reverseEvery) {
-        // Turns one way, slows down, then the other way, so that it throws marbles to the left
-        // as often as to the right. It never stops completely: marbles would rest on it.
-        const c = Math.cos((Math.PI * this.spinMs) / 1000 / base.reverseEvery);
-        spinner.speed = base.speed * Math.sign(c) * (0.35 + 0.65 * Math.abs(c));
-      }
-      const angle = spinner.speed * dt;
-      this.rotateBody(body, angle, spinner);
-      view.rotation += angle;
-    }
+    this.stepSpinners(delta);
     this.updateArena(delta);
     this.waitingText.setText(`Waiting: ${this.waiting.length}`);
-  }
-
-  /** Windmills: static compound bodies turned by hand each frame, drawn as a rotating container. */
-  private buildSpinners(): void {
-    this.spinMs = 0;
-    this.spins = this.level.spinners.map((base) => {
-      const spinner = { ...base }; // its `speed` is updated while the spinner reverses
-      const { x, y, w, h, arms } = spinner;
-      const angles = Array.from({ length: arms }, (_, k) => (k * Math.PI) / arms);
-      const parts = angles.map((angle) => this.matter.bodies.rectangle(x, y, w, h, { angle }));
-      const body = this.matter.body.create({ parts, isStatic: true });
-      (body as unknown as { plugin: { spin?: Spinner } }).plugin.spin = spinner;
-      this.matter.world.add(body);
-      const view = this.add.container(x, y, [
-        ...angles.map((angle) => this.add.rectangle(0, 0, w, h, 0xff8a5c).setRotation(angle)),
-        this.add.circle(0, 0, h * 0.9, 0xffd2bd),
-      ]);
-      return { body, view, spinner, base };
-    });
-  }
-
-  /** Speed of a spinner's surface at `p`, in px per physics step (assuming 60 steps per second). */
-  protected wallVelocityAt(
-    wall: MatterJS.BodyType,
-    p: { x: number; y: number },
-  ): {
-    x: number;
-    y: number;
-  } {
-    const root = (wall.parent ?? wall) as unknown as { plugin?: { spin?: Spinner } };
-    const spin = root.plugin?.spin;
-    if (!spin) return { x: 0, y: 0 };
-    const omega = spin.speed / 60;
-    return { x: -omega * (p.y - spin.y), y: omega * (p.x - spin.x) };
   }
 
   /** Lets the next waiting marble into the tube. */
@@ -344,23 +286,6 @@ export class DropScene extends TournamentScene {
         img.setVelocity((v.x / speed) * MAX_SPEED, (v.y / speed) * MAX_SPEED);
       }
       this.nudgeIfStuck(code, img, delta);
-    }
-  }
-
-  /**
-   * A marble balanced on a peak or wedged in a pile would never fall (it may jitter in place,
-   * so speed alone does not tell): when it has hardly moved for a while, give it a kick.
-   */
-  private nudgeIfStuck(code: string, img: Phaser.Physics.Matter.Image, delta: number): void {
-    const anchor = this.anchors.get(code);
-    if (!anchor || Math.hypot(img.x - anchor.x, img.y - anchor.y) > STUCK_DISTANCE) {
-      this.anchors.set(code, { x: img.x, y: img.y, ms: 0 });
-      return;
-    }
-    anchor.ms += delta;
-    if (anchor.ms > STUCK_AFTER) {
-      img.setVelocity(Phaser.Math.FloatBetween(-3, 3), -3);
-      anchor.ms = 0;
     }
   }
 

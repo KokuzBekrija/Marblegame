@@ -1,5 +1,5 @@
 /** Data-driven level definitions so new levels need no scene code. */
-export type LevelConfig = RingLevel | DropLevel;
+export type LevelConfig = RingLevel | DropLevel | RaceLevel;
 
 /**
  * Static obstacle. `diamond` is a rhombus with diagonals `w` (horizontal) and `h` (vertical),
@@ -28,6 +28,22 @@ export interface RingLevel extends BaseLevel {
   radius: number;
   rotationSpeed: number; // rad/s
   holes: { angle: number; width: number }[]; // angle in rad, width in rad
+}
+
+/**
+ * A long track from top to bottom, scrolled by the camera. All marbles start together in the
+ * pen; the first to cross `finishY` wins. The track is built from the `obstacles` (walls, ramps,
+ * funnels, pegs and bumpers) and the `spinners`.
+ */
+export interface RaceLevel extends BaseLevel {
+  kind: 'race';
+  bounds: { left: number; right: number; top: number };
+  worldHeight: number;
+  /** The marbles are lined up in rows in here, the lowest row at `bottom`. */
+  pen: { top: number; bottom: number };
+  finishY: number;
+  gravity: number; // Matter gravity.y
+  spinners: Spinner[];
 }
 
 /** Rotating obstacle: `arms` bars of length `w` and thickness `h` cross at (x, y) and turn at `speed`. */

@@ -21,6 +21,12 @@ const GAMES: GameChoice[] = [
     description:
       'Flags ride up a tube and drop into a field of pegs. Red holes eliminate them, green holes send them back to the start.',
   },
+  {
+    scene: 'Race',
+    title: 'Marble race',
+    description:
+      'All flags start together and race down a long track of slides, windmills and bumpers. The first across the finish line wins.',
+  },
 ];
 
 /** Start screen: the player picks which game to play. */
@@ -59,25 +65,25 @@ export class MenuScene extends Phaser.Scene {
     sound.on('pointerdown', toggle);
     this.input.keyboard?.on('keydown-M', toggle);
 
-    GAMES.forEach((game, i) => this.addButton(game, WIDTH / 2 + (i === 0 ? -290 : 290), 520));
+    GAMES.forEach((game, i) => this.addButton(game, WIDTH / 2 + (i - 1) * 390, 520));
   }
 
   private addButton(game: GameChoice, x: number, y: number): void {
     const box = this.add
-      .rectangle(x, y, 520, 360, 0x262a40)
+      .rectangle(x, y, 370, 400, 0x262a40)
       .setStrokeStyle(3, 0x6c7bd9)
       .setInteractive({ useHandCursor: true });
-    this.add.text(x, y - 90, game.title, { fontSize: '40px', color: '#ffffff' }).setOrigin(0.5);
+    this.add.text(x, y - 130, game.title, { fontSize: '36px', color: '#ffffff' }).setOrigin(0.5);
     this.add
-      .text(x, y + 20, game.description, {
-        fontSize: '22px',
+      .text(x, y + 10, game.description, {
+        fontSize: '21px',
         color: '#b8bfe8',
         align: 'center',
-        wordWrap: { width: 440 },
+        wordWrap: { width: 320 },
       })
       .setOrigin(0.5);
     this.add
-      .text(x, y + 120, 'Click to play', { fontSize: '24px', color: '#ffd166' })
+      .text(x, y + 150, 'Click to play', { fontSize: '24px', color: '#ffd166' })
       .setOrigin(0.5);
 
     box.on('pointerover', () => box.setFillStyle(0x323859));
