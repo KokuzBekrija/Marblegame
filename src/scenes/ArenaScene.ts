@@ -4,6 +4,7 @@ import { arenaRing } from '../levels/arena-ring';
 import { TournamentScene } from './TournamentScene';
 
 const MARBLE_SPEED = 5; // px per physics step
+const RING_COLOR = 0x6c7bd9; // sparks of a marble that has left the ring
 const SEGMENTS = 120; // ring resolution
 const TAU = Math.PI * 2;
 const CENTER = arenaRing.center;
@@ -65,7 +66,7 @@ export class ArenaScene extends TournamentScene {
     const escapeDistance = this.level.radius + WALL_THICKNESS + MARBLE_RADIUS;
     for (const [code, img] of this.marbles) {
       if (Phaser.Math.Distance.Between(img.x, img.y, CENTER.x, CENTER.y) > escapeDistance) {
-        this.eliminate(code);
+        this.eliminate(code, RING_COLOR);
         // If several marbles leave in the same frame, stop at the first moment one is left.
         if (this.tracker.winner) break;
         continue;

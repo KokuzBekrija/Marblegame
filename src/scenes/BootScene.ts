@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
+import { applyStoredMute } from '../audio/sfx';
 import { COUNTRIES } from '../data/countries';
+import { makeSparkTexture } from '../fx/effects';
 
 /** Loads assets (flag SVGs from public/flags) and starts the first level. */
 export class BootScene extends Phaser.Scene {
@@ -38,6 +40,8 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.makeMarbleTextures();
+    makeSparkTexture(this);
+    applyStoredMute(this);
     this.scene.start('Menu');
   }
 }

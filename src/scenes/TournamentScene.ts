@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
+import { Sfx, soundLabel, toggleMute } from '../audio/sfx';
 import { COUNTRIES } from '../data/countries';
+import { Effects } from '../fx/effects';
 import { EliminationTracker } from '../core/elimination';
 import { MARBLE_RADIUS } from '../core/spawn';
 import type { Point } from '../core/spawn';
@@ -44,6 +46,8 @@ export abstract class TournamentScene extends Phaser.Scene {
   protected tracker!: EliminationTracker;
   protected marbles = new Map<string, Phaser.Physics.Matter.Image>();
   protected finished = false;
+  protected sfx!: Sfx;
+  protected fx!: Effects;
   private panelRows: { icon: Phaser.GameObjects.Image | null; text: Phaser.GameObjects.Text }[] =
     [];
   private statusText!: Phaser.GameObjects.Text;
@@ -103,6 +107,8 @@ export abstract class TournamentScene extends Phaser.Scene {
 
   create(): void {
     this.scale.setGameSize(this.canvasWidth, CANVAS_HEIGHT);
+    this.sfx = new Sfx(this);
+    this.fx = new Effects(this);
     this.finished = false;
     this.panelRows = [];
     this.outCount = 0;
@@ -150,8 +156,11 @@ export abstract class TournamentScene extends Phaser.Scene {
     if (winnerCode) this.showWinner(winnerCode);
   }
 
-  /** Removes a marble from play and lists it with its final place. */
-  protected eliminate(code: string): void {
+  /** Removes a marble from play, with a puff of sparks in `color`, and lists its final place. */
+  protected eliminate(code: string, color = 0xffffff): void {
+    const img = this.marbles.get(code);
+    if (img) this.fx.burst(img.x, img.y, color);
+    this.sfx.eliminated();
     this.tracker.eliminate(code);
     this.addToOutList(code);
     this.marbles.get(code)?.destroy();
@@ -245,6 +254,7 @@ export abstract class TournamentScene extends Phaser.Scene {
     if (vn >= 0) return; // already moving away
     const e = -vn < this.restSpeed ? 0 : this.wallRestitution;
     marble.setVelocity(vx - (1 + e) * vn * n.x, vy - (1 + e) * vn * n.y);
+    this.sfx.hit(-vn, w.x !== 0 || w.y !== 0 ? 'clank' : 'tick');
   }
 
   /** Collision of two equal masses: they exchange velocity along the contact line. */
@@ -275,6 +285,7 @@ export abstract class TournamentScene extends Phaser.Scene {
     const impulse = ((1 + e) * approach) / 2;
     a.setVelocity(va.x - impulse * n.x, va.y - impulse * n.y);
     b.setVelocity(vb.x + impulse * n.x, vb.y + impulse * n.y);
+    this.sfx.hit(approach * 0.7); // marbles click softer than walls
   }
 
   private roundLabel(): string {
@@ -300,6 +311,21 @@ export abstract class TournamentScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', leave);
     this.input.keyboard?.once('keydown-ESC', leave);
+
+    const sound = this.add
+      .text(PANEL_X + 150, 8, soundLabel(this), {
+        fontSize: '16px',
+        color: '#ffffff',
+        backgroundColor: '#323859',
+        padding: { x: 10, y: 5 },
+      })
+      .setInteractive({ useHandCursor: true });
+    const toggle = () => {
+      toggleMute(this);
+      sound.setText(soundLabel(this));
+    };
+    sound.on('pointerdown', toggle);
+    this.input.keyboard?.on('keydown-M', toggle);
   }
 
   /** Left-hand list: one row per qualifying round plus the finale, filled in as winners are known. */
@@ -416,6 +442,11 @@ export abstract class TournamentScene extends Phaser.Scene {
     } else {
       this.statusText.setText(`${label} – winner: ${countryName(code)}`);
     }
+
+    const champion = this.tournament.isComplete;
+    this.fx.winner(this.arenaCenter.x, this.arenaCenter.y, champion);
+    if (champion) this.sfx.champion();
+    else this.sfx.roundWon();
 
     if (img) {
       this.onWinner(img);

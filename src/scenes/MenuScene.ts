@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { Sfx, soundLabel, toggleMute } from '../audio/sfx';
 import { CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH as WIDTH } from './TournamentScene';
 
 interface GameChoice {
@@ -41,6 +42,23 @@ export class MenuScene extends Phaser.Scene {
       .text(WIDTH / 2, 230, 'Choose a game', { fontSize: '28px', color: '#9aa0c0' })
       .setOrigin(0.5);
 
+    const sound = this.add
+      .text(WIDTH - 24, 24, soundLabel(this), {
+        fontSize: '18px',
+        color: '#ffffff',
+        backgroundColor: '#323859',
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true });
+    const toggle = () => {
+      toggleMute(this);
+      sound.setText(soundLabel(this));
+      new Sfx(this).click();
+    };
+    sound.on('pointerdown', toggle);
+    this.input.keyboard?.on('keydown-M', toggle);
+
     GAMES.forEach((game, i) => this.addButton(game, WIDTH / 2 + (i === 0 ? -290 : 290), 520));
   }
 
@@ -64,6 +82,9 @@ export class MenuScene extends Phaser.Scene {
 
     box.on('pointerover', () => box.setFillStyle(0x323859));
     box.on('pointerout', () => box.setFillStyle(0x262a40));
-    box.on('pointerdown', () => this.scene.start(game.scene));
+    box.on('pointerdown', () => {
+      new Sfx(this).click();
+      this.scene.start(game.scene);
+    });
   }
 }

@@ -17,6 +17,8 @@ const MIN_GAP = 34; // marbles on the return channel keep at least this distance
 const GREEN_AT = 30; // px below the floor peaks where a marble counts as inside a green hole
 const RED_AT = 40; // ... and where it is out in a red hole
 const PIPE_COLOR = 0x20243a;
+const RED_HOLE_COLOR = 0xd64545; // sparks of an eliminated marble, like the red pits
+const GREEN_HOLE_COLOR = 0x2ecc71;
 const ALL_CATEGORIES = 0xffffffff;
 
 const { tube, floorY, holes } = dropField;
@@ -285,6 +287,8 @@ export class DropScene extends TournamentScene {
 
   /** A marble fell through a green hole: it rides the channel back to the start of the tube. */
   private startReturn(code: string, img: Phaser.Physics.Matter.Image): void {
+    this.fx.burst(img.x, img.y, GREEN_HOLE_COLOR, 9);
+    this.sfx.recycled();
     // If the chute is occupied, the marble queues up above the marble in front of it.
     const busy = this.returning.map((t) => pointAt(t.path, t.s));
     let y = img.y;
@@ -314,7 +318,7 @@ export class DropScene extends TournamentScene {
           continue;
         }
         if (img.y > floorY + RED_AT) {
-          this.eliminate(code);
+          this.eliminate(code, RED_HOLE_COLOR);
           if (this.tracker.winner) break;
           continue;
         }
