@@ -1,4 +1,4 @@
-import type { DropHole, DropLevel, Obstacle, Spinner } from './types';
+﻿import type { DropHole, DropLevel, Obstacle, Spinner } from './types';
 
 // Playfield right of the winners panel, above the strip listing the eliminated flags.
 // The tube runs up the right edge; its return channel passes below the floor of the arena.
@@ -13,15 +13,30 @@ const TUBE_X = 1133;
 const TUBE_WIDTH = 46;
 const TUBE_BOTTOM_Y = 1030;
 const TUBE_TOP_Y = 110;
-const RELEASE_MIN_X = LEFT + 40; // marbles fall out of the rail anywhere across the arena
-const RELEASE_MAX_X = RIGHT - 40;
+const RELEASE_MIN_X = (LEFT + RIGHT) / 2 - 30;
+const RELEASE_MAX_X = (LEFT + RIGHT) / 2 + 30;
 const RIGHT_WALL_TOP = 140; // below the passage that leads from the tube into the arena
 
-const PEG_ROWS = 11;
+const PEG_ROWS = 6; // the lower part of the arena is the Galton board
 const PEG_TOP = 190;
 const PEG_ROW_GAP = 64;
 const PEG_PITCH = 78;
 const PEG_DIAMETER = 18;
+
+const GALTON_TOP = 600;
+const GALTON_ROWS = 7;
+const GALTON_ROW_GAP = 44;
+const GALTON_COLS = 9;
+const GALTON_EDGE = 30; // distance of the outermost pegs from the walls
+const GALTON_PITCH = (RIGHT - LEFT - 2 * GALTON_EDGE) / GALTON_COLS; // 71px: gaps of 55px, 1.7 marbles
+const GALTON_PEG = 16;
+const GALTON_SCATTER = 10; // px; gaps stay at 55 - 2 * 10 = 35px, still wider than a marble
+
+/** Fixed pseudo-random number in [-1, 1) from two integers: the same layout on every start. */
+function scatter(a: number, b: number): number {
+  const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return (v - Math.floor(v)) * 2 - 1;
+}
 
 const HOLE_KINDS: DropHole['kind'][] = ['red', 'green', 'red', 'red', 'green', 'red'];
 const HOLES = HOLE_KINDS.length;
@@ -63,19 +78,17 @@ const holes: DropHole[] = HOLE_KINDS.map((kind, k) => ({
 }));
 
 /**
- * Large windmills in three staggered rows that together cover most of the arena width: the
- * gaps between them are only about 1.5 marbles wide, so many marbles are caught and flung.
- * Neighbours turn in opposite directions, like meshing gears, so nothing is sheared between them.
+ * Large windmills in two staggered rows in the upper half of the arena: the gaps between them
+ * are only about 1.5 marbles wide, so many marbles are caught and flung. Neighbours turn in
+ * opposite directions, like meshing gears, so nothing is sheared between them.
  */
 const spinners: Spinner[] = [
-  { x: 520, y: 300, w: 170, h: 16, arms: 2, speed: 1.3 },
-  { x: 740, y: 300, w: 170, h: 16, arms: 2, speed: -1.3 },
-  { x: 960, y: 300, w: 170, h: 16, arms: 2, speed: 1.3 },
-  { x: 630, y: 520, w: 170, h: 16, arms: 3, speed: -1.6 },
-  { x: 850, y: 520, w: 170, h: 16, arms: 3, speed: 1.6 },
-  { x: 520, y: 740, w: 170, h: 16, arms: 2, speed: -1.3 },
-  { x: 740, y: 740, w: 170, h: 16, arms: 2, speed: 1.3 },
-  { x: 960, y: 740, w: 170, h: 16, arms: 2, speed: -1.3 },
+  { x: 520, y: 290, w: 170, h: 16, arms: 2, speed: 1.3 },
+  // Under the stream of marbles: if it always turned one way it would throw them all to one side.
+  { x: 740, y: 290, w: 170, h: 16, arms: 2, speed: 1.3, reverseEvery: 4 },
+  { x: 960, y: 290, w: 170, h: 16, arms: 2, speed: -1.3 },
+  { x: 630, y: 470, w: 170, h: 16, arms: 3, speed: -1.6 },
+  { x: 850, y: 470, w: 170, h: 16, arms: 3, speed: 1.6 },
 ];
 const SPINNER_CLEARANCE = 34; // pegs closer than this to the tip of a spinner are left out
 
@@ -103,6 +116,37 @@ const field: Obstacle[] = Array.from({ length: PEG_ROWS }, (_, row) => {
   );
 }).flat();
 
+/**
+ * A Galton board above the floor: dense staggered pegs that every marble has to bounce down.
+ * Each peg sends a marble left or right, so the marbles are spread over all holes, whatever
+ * paths the spinners above have funnelled them into. Without it nearly all marbles left
+ * through one or two holes.
+ */
+const galton: Obstacle[] = Array.from({ length: GALTON_ROWS }, (_, row) => {
+  const y = GALTON_TOP + row * GALTON_ROW_GAP;
+  // Even rows have a peg close to each wall (leaving less than a marble's width, so marbles
+  // cannot slide down along the wall into the outer holes); odd rows lie in between.
+  const count = row % 2 === 0 ? GALTON_COLS + 1 : GALTON_COLS;
+  const shift = row % 2 === 0 ? 0 : 0.5;
+  return Array.from({ length: count }, (_, k) => {
+    // A regular grid sends the marbles down the same few lanes; a slight, fixed scatter of
+    // the inner pegs breaks that up. The pegs next to the walls stay where they are.
+    const atWall = row % 2 === 0 && (k === 0 || k === count - 1);
+    return {
+      shape: 'circle' as const,
+      bumper: true,
+      x:
+        LEFT +
+        GALTON_EDGE +
+        (k + shift) * GALTON_PITCH +
+        (atWall ? 0 : scatter(row, k) * GALTON_SCATTER),
+      y: y + (atWall ? 0 : scatter(k, row + 7) * (GALTON_SCATTER / 2)),
+      w: GALTON_PEG,
+      h: GALTON_PEG,
+    };
+  });
+}).flat();
+
 export const dropField: DropLevel = {
   kind: 'drop',
   id: 'drop-field',
@@ -120,5 +164,5 @@ export const dropField: DropLevel = {
     releaseMinX: RELEASE_MIN_X,
     releaseMaxX: RELEASE_MAX_X,
   },
-  obstacles: [...walls, ...peaks, ...field],
+  obstacles: [...walls, ...peaks, ...field, ...galton],
 };

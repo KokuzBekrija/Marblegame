@@ -12,6 +12,11 @@ const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
 export const DEFAULT_CANVAS_WIDTH = 1200;
 export const CANVAS_HEIGHT = 1070;
 const NEXT_ROUND_DELAY = 4500; // ms the winner stays on screen
+// Bumpers (pinball style): they throw marbles away from them, which mixes the marbles up.
+const BUMPER_RESTITUTION = 1.15; // above 1: the marble leaves faster than it came
+const BUMPER_KICK = 3.5; // px/step; least speed away from a bumper
+const BUMPER_SCATTER = 0.5; // rad; largest random turn after a bumper hit
+type BumperPlugin = { bumper?: Phaser.GameObjects.Arc };
 const WINNER_SCALE = 5; // the winner's flag is enlarged to this many times its size
 const BANNER_WIDTH = 640; // longer country names wrap to a second line
 const PANEL_X = 24;
@@ -70,6 +75,8 @@ export abstract class TournamentScene extends Phaser.Scene {
   /** Impacts slower than this (px/step) do not bounce, so resting marbles do not jitter. */
   protected abstract readonly restSpeed: number;
   protected abstract readonly marbleFrictionAir: number;
+  /** Largest random turn (rad) of a marble's direction when it bounces off a wall; 0 = none. */
+  protected readonly bounceScatter: number = 0;
 
   /** Creates gravity, walls and obstacles. */
   protected abstract buildWorld(): void;
@@ -175,8 +182,13 @@ export abstract class TournamentScene extends Phaser.Scene {
       const angle = o.angle ?? 0;
       const opts = { isStatic: true, angle, restitution: 1 };
       if (o.shape === 'circle') {
-        this.matter.add.circle(o.x, o.y, o.w / 2, opts);
-        this.add.circle(o.x, o.y, o.w / 2, 0xb8bfe8);
+        const body = this.matter.add.circle(o.x, o.y, o.w / 2, opts);
+        if (o.bumper) {
+          const view = this.add.circle(o.x, o.y, o.w / 2, 0xff6fa8).setStrokeStyle(3, 0xffc1d8);
+          (body as unknown as { plugin: BumperPlugin }).plugin.bumper = view;
+        } else {
+          this.add.circle(o.x, o.y, o.w / 2, 0xb8bfe8);
+        }
       } else if (o.shape === 'diamond') {
         const hw = o.w / 2;
         const hh = o.h / 2;
@@ -254,9 +266,51 @@ export abstract class TournamentScene extends Phaser.Scene {
     const { x: vx, y: vy } = body.velocity;
     const vn = (vx - w.x) * n.x + (vy - w.y) * n.y;
     if (vn >= 0) return; // already moving away
-    const e = -vn < this.restSpeed ? 0 : this.wallRestitution;
-    marble.setVelocity(vx - (1 + e) * vn * n.x, vy - (1 + e) * vn * n.y);
-    this.sfx.hit(-vn, w.x !== 0 || w.y !== 0 ? 'clank' : 'tick');
+    const bumper = ((wall.parent ?? wall) as unknown as { plugin?: BumperPlugin }).plugin?.bumper;
+    const e = bumper ? BUMPER_RESTITUTION : -vn < this.restSpeed ? 0 : this.wallRestitution;
+    let nx = vx - (1 + e) * vn * n.x;
+    let ny = vy - (1 + e) * vn * n.y;
+    if (bumper) {
+      // Even a light touch launches the marble: top up the speed away from the bumper.
+      const away = nx * n.x + ny * n.y;
+      if (away < BUMPER_KICK) {
+        nx += (BUMPER_KICK - away) * n.x;
+        ny += (BUMPER_KICK - away) * n.y;
+      }
+    }
+    const scatter = bumper ? BUMPER_SCATTER : this.bounceScatter;
+    if (e > 0 && scatter > 0) {
+      // A real bounce is never perfectly predictable. A little random turn keeps marbles that
+      // start almost identically from always following the same path through the obstacles.
+      const turn = (Math.random() * 2 - 1) * scatter;
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const rx = nx * cos - ny * sin;
+      const ry = nx * sin + ny * cos;
+      // Never turn a marble back into the wall it has just left.
+      if ((rx - w.x) * n.x + (ry - w.y) * n.y > 0) {
+        nx = rx;
+        ny = ry;
+      }
+    }
+    marble.setVelocity(nx, ny);
+    if (bumper) this.hitBumper(bumper, contact);
+    else this.sfx.hit(-vn, w.x !== 0 || w.y !== 0 ? 'clank' : 'tick');
+  }
+
+  /** A bumper swells for a moment, throws a few sparks and boings (once per swell). */
+  private hitBumper(view: Phaser.GameObjects.Arc, contact: Vec): void {
+    this.sfx.bumper();
+    if (view.getData('swelling')) return;
+    view.setData('swelling', true);
+    this.fx.burst(contact.x, contact.y, 0xff6fa8, 3);
+    this.tweens.add({
+      targets: view,
+      scale: 1.5,
+      duration: 70,
+      yoyo: true,
+      onComplete: () => view.setData('swelling', false),
+    });
   }
 
   /** Collision of two equal masses: they exchange velocity along the contact line. */

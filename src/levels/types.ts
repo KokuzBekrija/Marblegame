@@ -7,6 +7,7 @@ export type LevelConfig = RingLevel | DropLevel;
  */
 export interface Obstacle {
   shape?: 'bar' | 'diamond' | 'circle'; // default 'bar'
+  bumper?: boolean; // circles only: kicks marbles away with extra energy, like a pinball bumper
   x: number;
   y: number;
   w: number;
@@ -37,6 +38,7 @@ export interface Spinner {
   h: number;
   arms: number;
   speed: number; // rad/s, positive = clockwise on screen
+  reverseEvery?: number; // s; when set, the spinner keeps changing its direction of turning
 }
 
 /** A gap in the floor: a marble falling through a red hole is out, through a green one it is recycled. */

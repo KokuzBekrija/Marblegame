@@ -12,6 +12,7 @@ const RIDE_SPEED = 180; // px/s along the tube
 const RIDE_SPACING = 35; // px between marbles in the tube: a marble is 32px wide, so almost touching
 const FEED_MS = (RIDE_SPACING / RIDE_SPEED) * 1000; // one marble enters the tube this often
 const GOLDEN_CONJUGATE = 0.6180339887; // steps the drop position evenly across the arena
+const RELEASE_SPEED = 6; // px/step; largest sideways speed a marble gets when it leaves the rail
 const RETURN_SPEED = 300; // px/s along the channel from a green hole back to the tube
 const MIN_GAP = 34; // marbles on the return channel keep at least this distance (they are 32px wide)
 const GREEN_AT = 30; // px below the floor peaks where a marble counts as inside a green hole
@@ -26,7 +27,8 @@ const { tube, floorY, holes } = dropField;
 interface Spin {
   body: MatterJS.BodyType;
   view: Phaser.GameObjects.Container;
-  spinner: Spinner;
+  spinner: Spinner; // working copy: its speed changes when the spinner reverses
+  base: Spinner; // as defined by the level
 }
 
 interface Traveller {
@@ -54,6 +56,9 @@ export class DropScene extends TournamentScene {
   protected readonly marbleRestitution = 0.5;
   protected readonly restSpeed = 0.7;
   protected readonly marbleFrictionAir = 0.02;
+  // Without it, marbles dropped at similar places follow the same lanes and nearly all of them
+  // leave through one or two holes.
+  protected readonly bounceScatter = 0.3;
   private anchors = new Map<string, { x: number; y: number; ms: number }>();
   private waiting: string[] = []; // hidden at the tube entrance, in the order they will ride up
   private riding: Traveller[] = [];
@@ -63,6 +68,7 @@ export class DropScene extends TournamentScene {
   private dropPhase = 0; // random start of the sequence of drop positions
   private dropCount = 0;
   private spins: Spin[] = [];
+  private spinMs = 0;
   private waitingText!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -113,7 +119,14 @@ export class DropScene extends TournamentScene {
     this.feed(delta);
     this.advance(this.riding, RIDE_SPEED * dt, (t) => this.release(t.code, t.path.at(-1)!.x));
     this.advanceReturning(RETURN_SPEED * dt);
-    for (const { body, view, spinner } of this.spins) {
+    this.spinMs += delta;
+    for (const { body, view, spinner, base } of this.spins) {
+      if (base.reverseEvery) {
+        // Turns one way, slows down, then the other way, so that it throws marbles to the left
+        // as often as to the right. It never stops completely: marbles would rest on it.
+        const c = Math.cos((Math.PI * this.spinMs) / 1000 / base.reverseEvery);
+        spinner.speed = base.speed * Math.sign(c) * (0.35 + 0.65 * Math.abs(c));
+      }
       const angle = spinner.speed * dt;
       this.rotateBody(body, angle, spinner);
       view.rotation += angle;
@@ -124,7 +137,9 @@ export class DropScene extends TournamentScene {
 
   /** Windmills: static compound bodies turned by hand each frame, drawn as a rotating container. */
   private buildSpinners(): void {
-    this.spins = this.level.spinners.map((spinner) => {
+    this.spinMs = 0;
+    this.spins = this.level.spinners.map((base) => {
+      const spinner = { ...base }; // its `speed` is updated while the spinner reverses
       const { x, y, w, h, arms } = spinner;
       const angles = Array.from({ length: arms }, (_, k) => (k * Math.PI) / arms);
       const parts = angles.map((angle) => this.matter.bodies.rectangle(x, y, w, h, { angle }));
@@ -135,7 +150,7 @@ export class DropScene extends TournamentScene {
         ...angles.map((angle) => this.add.rectangle(0, 0, w, h, 0xff8a5c).setRotation(angle)),
         this.add.circle(0, 0, h * 0.9, 0xffd2bd),
       ]);
-      return { body, view, spinner };
+      return { body, view, spinner, base };
     });
   }
 
@@ -262,7 +277,7 @@ export class DropScene extends TournamentScene {
       .setPosition(x, tube.topY)
       .setStatic(false)
       .setCollidesWith(ALL_CATEGORIES)
-      .setVelocity(Phaser.Math.FloatBetween(-1.5, 1.5), 0);
+      .setVelocity(Phaser.Math.FloatBetween(-RELEASE_SPEED, RELEASE_SPEED), 0);
     this.away.delete(code);
     this.anchors.delete(code);
   }

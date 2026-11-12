@@ -41,8 +41,18 @@ describe('drop field', () => {
     }
   });
 
-  it('spreads the release range over most of the arena width', () => {
-    expect(tube.releaseMaxX - tube.releaseMinX).toBeGreaterThan((bounds.right - bounds.left) * 0.8);
+  it('releases the marbles at the center of the arena, so that where a marble was released does not decide its hole', () => {
+    // Falling straight down, a marble ends up in the hole under it: releasing across the width
+    // made the exit predictable (marbles released at the end left through the last hole).
+    const center = (bounds.left + bounds.right) / 2;
+    expect((tube.releaseMinX + tube.releaseMaxX) / 2).toBeCloseTo(center, 0);
+    expect(tube.releaseMaxX - tube.releaseMinX).toBeLessThan((bounds.right - bounds.left) * 0.2);
+  });
+
+  it('has bumpers that spread the marbles sideways above the floor', () => {
+    const bumpers = obstacles.filter((o) => o.bumper);
+    expect(bumpers.length).toBeGreaterThan(20);
+    for (const b of bumpers) expect(b.shape).toBe('circle');
   });
 
   it('keeps the spinners clear of the walls, the floor, the obstacles and each other', () => {

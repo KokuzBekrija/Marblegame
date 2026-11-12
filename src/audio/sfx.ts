@@ -61,6 +61,13 @@ export class Sfx {
     });
   }
 
+  /** A marble hits a bumper: a short rising boing. */
+  bumper(): void {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running' || !this.hits.tryStart(ctx.currentTime)) return;
+    this.tone(300, 0.13, 0.07, { slideTo: 640, end: () => this.hits.end() });
+  }
+
   /** A marble is out: a short falling blop. */
   eliminated(): void {
     const ctx = this.ctx;
