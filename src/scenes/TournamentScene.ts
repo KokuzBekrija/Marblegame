@@ -11,7 +11,9 @@ import type { LevelConfig } from '../levels/types';
 const MARBLE_TEXTURE_SIZE = 64; // must match makeMarbleTextures in BootScene
 export const DEFAULT_CANVAS_WIDTH = 1200;
 export const CANVAS_HEIGHT = 1070;
-const NEXT_ROUND_DELAY = 3000; // ms the winner stays on screen
+const NEXT_ROUND_DELAY = 4500; // ms the winner stays on screen
+const WINNER_SCALE = 5; // the winner's flag is enlarged to this many times its size
+const BANNER_WIDTH = 640; // longer country names wrap to a second line
 const PANEL_X = 24;
 const PANEL_ROW_Y = 84;
 const PANEL_ROW_HEIGHT = 48;
@@ -377,9 +379,14 @@ export abstract class TournamentScene extends Phaser.Scene {
     row.icon = null;
     if (code) {
       row.icon = this.add.image(PANEL_X + 16, y + 14, `marble-${code}`).setDisplaySize(32, 32);
-      row.text.setText(`${label} – ${countryName(code)}`).setColor('#ffffff');
+      const text = `${label} – ${countryName(code)}`;
+      // A long name takes two lines; a smaller font keeps them inside the row.
+      row.text
+        .setText(text)
+        .setColor('#ffffff')
+        .setFontSize(text.length > 28 ? 16 : 20);
     } else {
-      row.text.setText(`${label} – ?`).setColor('#6b6f85');
+      row.text.setText(`${label} – ?`).setColor('#6b6f85').setFontSize(20);
     }
   }
 
@@ -423,6 +430,46 @@ export abstract class TournamentScene extends Phaser.Scene {
       .setOrigin(0.5, 0);
   }
 
+  /**
+   * Makes the winner stand out: a gold ring around the enlarged flag, a caption above it and
+   * the name of the country in big letters below it. They pop in once the flag has arrived.
+   */
+  private showWinnerBanner(code: string, caption: string, champion: boolean): void {
+    const { x, y } = this.arenaCenter;
+    const reach = MARBLE_RADIUS * WINNER_SCALE; // radius of the enlarged flag
+    const outline = { stroke: '#1b1d2a', strokeThickness: 8 };
+    const ring = this.add.circle(x, y, reach + 5).setStrokeStyle(6, 0xffd166);
+    const top = this.add
+      .text(x, y - reach - 16, caption, {
+        fontSize: champion ? '40px' : '30px',
+        color: '#ffd166',
+        fontStyle: 'bold',
+        ...outline,
+      })
+      .setOrigin(0.5, 1);
+    const name = this.add
+      .text(x, y + reach + 16, countryName(code), {
+        fontSize: champion ? '60px' : '48px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+        align: 'center',
+        wordWrap: { width: BANNER_WIDTH },
+        ...outline,
+      })
+      .setOrigin(0.5, 0);
+    for (const target of [ring, top, name]) {
+      target.setDepth(15).setAlpha(0).setScale(0.6);
+      this.tweens.add({
+        targets: target,
+        alpha: 1,
+        scale: 1,
+        duration: 450,
+        delay: 350,
+        ease: 'Back.easeOut',
+      });
+    }
+  }
+
   /** The last marble stays in the arena: it is frozen and glides to the center. */
   private showWinner(code: string): void {
     this.finished = true;
@@ -438,7 +485,8 @@ export abstract class TournamentScene extends Phaser.Scene {
     );
 
     if (this.tournament.isComplete) {
-      this.statusText.setText(`Champion: ${countryName(code)} – click to return to the menu`);
+      // The name is in the banner; a long name here would run off the screen.
+      this.statusText.setText('Champion – click to return to the menu');
     } else {
       this.statusText.setText(`${label} – winner: ${countryName(code)}`);
     }
@@ -455,11 +503,12 @@ export abstract class TournamentScene extends Phaser.Scene {
         targets: img,
         x: this.arenaCenter.x,
         y: this.arenaCenter.y,
-        scale: img.scale * 3,
+        scale: img.scale * WINNER_SCALE,
         duration: 800,
         ease: 'Sine.easeInOut',
       });
     }
+    this.showWinnerBanner(code, champion ? 'CHAMPION' : `ROUND ${rowIndex + 1} WINNER`, champion);
 
     if (this.tournament.isComplete) {
       this.input.once('pointerdown', () => this.scene.start('Menu'));
